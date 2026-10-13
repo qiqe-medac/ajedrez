@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101a20">
+  <title>Chess — Ajedrez</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- chess.js 1.4.0 se importa desde una CDN en script.js; requiere Internet. -->
+  <script type="module" src="js/script.js"></script>
+</head>
+<body>
+  <main class="game-shell">
+    <header class="page-header">
+      <a class="brand" href="index.html" aria-label="Chess, inicio">
+        <span class="brand-mark" aria-hidden="true">♞</span>
+        <span>Chess</span>
+      </a>
+      <p class="header-caption">Una partida, a tu ritmo</p>
+    </header>
+
+    <section class="game-layout" aria-label="Partida de ajedrez">
+      <div class="board-frame">
+        <section id="chess-clocks" class="chess-clocks" aria-label="Relojes de la partida">
+          <div id="white-clock" class="clock-card" aria-label="Reloj de las blancas">
+            <div class="clock-player-info">
+              <span class="clock-player">Blancas</span>
+              <span id="white-clock-status" class="clock-status">Preparado</span>
+            </div>
+            <time id="white-clock-time" class="clock-time" datetime="PT0S">00:00</time>
+          </div>
+          <div id="black-clock" class="clock-card" aria-label="Reloj de las negras">
+            <div class="clock-player-info">
+              <span class="clock-player">Negras</span>
+              <span id="black-clock-status" class="clock-status">Preparado</span>
+            </div>
+            <time id="black-clock-time" class="clock-time" datetime="PT0S">00:00</time>
+          </div>
+        </section>
+        <div class="board-coordinate-layout" aria-label="Tablero y coordenadas">
+          <div class="board-files board-files-top" aria-hidden="true"></div>
+          <div class="board-ranks board-ranks-left" aria-hidden="true"></div>
+          <div id="chessboard" class="chessboard" role="grid" aria-label="Tablero de ajedrez"></div>
+          <div class="board-ranks board-ranks-right" aria-hidden="true"></div>
+          <div class="board-files board-files-bottom" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <aside class="game-panel" aria-label="Estado de la partida">
+        <div class="panel-heading">
+          <p class="eyebrow">PARTIDA LOCAL</p>
+          <h1>Chess</h1>
+        </div>
+        <div class="turn-card" aria-live="polite">
+          <span class="turn-indicator" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">TURNO ACTUAL</p>
+            <p id="turn-label" class="turn-label">Blancas</p>
+          </div>
+        </div>
+        <p class="panel-note">El tablero está listo para una nueva partida.</p>
+        <div class="control-buttons" role="group" aria-label="Mostrar control de casillas">
+          <button id="white-control-button" class="reset-button control-button" type="button" aria-pressed="false" aria-label="Mostrar control de las piezas blancas">
+            <span aria-hidden="true">◉</span><span>Control blancas</span>
+          </button>
+          <button id="black-control-button" class="reset-button control-button" type="button" aria-pressed="false" aria-label="Mostrar control de las piezas negras">
+            <span aria-hidden="true">◉</span><span>Control negras</span>
+          </button>
+        </div>
+        <button id="rotate-board-button" class="reset-button" type="button" aria-label="Girar orientación del tablero" aria-pressed="false">
+          <span aria-hidden="true">⟳</span> Girar tablero
+        </button>
+        <button id="reset-button" class="reset-button" type="button">
+          <span aria-hidden="true">↻</span> Reiniciar partida
+        </button>
+        <p class="phase-note">Mueve las piezas con clic o arrastrándolas</p>
+      </aside>
+    </section>
+    <footer class="page-footer">Chess <span aria-hidden="true">·</span> Juego de estrategia</footer>
+  </main>
+</body>
+</html>
