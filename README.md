@@ -12,11 +12,16 @@ Aplicación web de ajedrez para dos personas en el mismo dispositivo. Presenta u
 - Girar el tablero; las coordenadas exteriores se actualizan para seguir la orientación visible.
 - Ver un reloj ascendente para cada bando durante su turno.
 - Reiniciar la partida.
+- Guardar la posición actual o la posición editable como archivo de texto `.fen`, sin enviar datos a un servidor.
+- Cargar archivos FEN locales; en Juego se validan antes de sustituir la partida y, si no puede iniciarse, se ofrece abrirlos en Modo Diseño.
+- Crear posiciones personalizadas en Modo Diseño: colocar piezas de ambos colores, arrastrarlas, eliminarlas, vaciar el tablero o restaurar la posición inicial.
+- Validar reyes, jaques, jaque mate, ahogado y movimientos legales antes de iniciar una partida desde una posición editada.
+- Elegir el bando que juega primero. La validación estricta avisa de que el editor no conserva historial y no puede certificar la legalidad histórica de una posición.
 - Usar una interfaz adaptable a escritorio y móvil, con piezas SVG locales.
 
 ## Tecnologías
 
-El proyecto utiliza HTML5, CSS3 y JavaScript vanilla. No requiere Node.js, npm, frameworks ni backend. La aplicación carga `chess.js` como módulo ESM desde jsDelivr, por lo que se necesita conexión a Internet para iniciar la partida. Las piezas se cargan desde la carpeta local `pieces/`.
+El proyecto utiliza HTML5, CSS3 y JavaScript vanilla. No requiere Node.js, npm, frameworks ni backend. La aplicación carga `chess.js` como módulo ESM desde jsDelivr, por lo que se necesita conexión a Internet para iniciar la partida. Las piezas se cargan desde la carpeta local `pieces/`. FEN conserva la posición, el turno, los derechos de enroque, la casilla al paso y los contadores; no almacena el historial completo ni el tiempo de los relojes.
 
 ## Cómo abrir
 

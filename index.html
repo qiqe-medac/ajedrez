@@ -58,6 +58,46 @@
             <p id="turn-label" class="turn-label">Blancas</p>
           </div>
         </div>
+        <div class="validation-mode-control">
+          <label for="validation-level">Validación de posiciones</label>
+          <select id="validation-level">
+            <option value="basic">Básica</option>
+            <option value="strict">Estricta (sin historial)</option>
+          </select>
+        </div>
+        <button id="enter-design-button" class="reset-button" type="button">Modo diseño</button>
+        <div class="position-file-buttons" role="group" aria-label="Guardar o cargar posiciones">
+          <button id="save-position-button" class="reset-button" type="button">Guardar posición</button>
+          <button id="load-position-button" class="reset-button" type="button">Cargar posición</button>
+        </div>
+        <input id="position-file-input" type="file" accept=".fen,text/plain" hidden>
+        <section id="design-tools" class="design-tools" aria-label="Herramientas de diseño" hidden>
+          <h2>Editar posición</h2>
+          <label for="design-color">Color de las piezas</label>
+          <select id="design-color">
+            <option value="w">Blancas</option>
+            <option value="b">Negras</option>
+          </select>
+          <span class="design-label">Selecciona una pieza</span>
+          <div id="piece-palette" class="piece-palette" role="group" aria-label="Piezas para colocar"></div>
+          <button id="erase-piece-button" class="reset-button" type="button" aria-pressed="false">Eliminar pieza</button>
+          <div class="design-action-row">
+            <button id="clear-board-button" class="reset-button" type="button">Vaciar</button>
+            <button id="initial-position-button" class="reset-button" type="button">Posición inicial</button>
+          </div>
+          <label for="design-turn">Juegan</label>
+          <select id="design-turn">
+            <option value="w">Blancas</option>
+            <option value="b">Negras</option>
+          </select>
+          <button id="validate-position-button" class="reset-button" type="button">Validar posición</button>
+          <button id="start-designed-game-button" class="reset-button primary-button" type="button">Iniciar partida</button>
+        </section>
+        <section id="design-message" class="design-message" aria-live="polite" hidden>
+          <button id="close-design-message" class="message-close" type="button" aria-label="Cerrar mensaje">×</button>
+          <div id="design-message-content"></div>
+          <button id="load-in-design-button" class="reset-button" type="button" hidden>Cargar en Modo Diseño</button>
+        </section>
         <p class="panel-note">El tablero está listo para una nueva partida.</p>
         <div class="control-buttons" role="group" aria-label="Mostrar control de casillas">
           <button id="white-control-button" class="reset-button control-button" type="button" aria-pressed="false" aria-label="Mostrar control de las piezas blancas">
