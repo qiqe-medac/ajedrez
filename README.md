@@ -1,6 +1,8 @@
 # Chess — ajedrez en el navegador
 
-Aplicación web de ajedrez para dos personas en el mismo dispositivo. Presenta un tablero interactivo y permite jugar una partida local desde un navegador moderno.
+**Sitio publicado:** [ajedrez-inky.vercel.app](https://ajedrez-inky.vercel.app/)
+
+Este proyecto es un **Estudio de Ajedrez para aprender y analizar posiciones**. Presenta un tablero interactivo para jugar y explorar posiciones desde un navegador moderno.
 
 ## Funcionalidades
 
