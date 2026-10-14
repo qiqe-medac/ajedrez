@@ -92,7 +92,20 @@ h1 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.5rem); font-weight: 650; letter-
 .reset-button:active { transform: translateY(1px); }
 .reset-button:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; }
 .reset-button.is-active { border-color: #70c2b5a8; background: #24504e; box-shadow: inset 0 0 0 1px #70c2b54a; }
+.reset-button:disabled { cursor: not-allowed; opacity: .55; }
 .reset-button span { color: var(--color-accent); font-size: 1.25rem; }
+.analysis-panel { display: grid; gap: .55rem; margin-top: .55rem; padding: .75rem; border: 1px solid #d3a86766; border-radius: 14px; background: #19272e; }
+.analysis-heading h2 { margin: 0; font-size: .95rem; }
+.analysis-heading p { min-height: 1.3em; margin: .25rem 0 0; color: var(--color-muted); font-size: .72rem; line-height: 1.4; }
+.analysis-variants { display: grid; max-height: min(38vh, 270px); gap: .4rem; overflow: auto; margin: 0; padding: 0 .2rem 0 0; list-style: none; overscroll-behavior: contain; }
+.analysis-variant { display: grid; width: 100%; min-width: 0; justify-items: start; gap: .22rem; padding: .55rem; border: 1px solid #ffffff20; border-radius: 9px; background: var(--color-panel-raised); color: var(--color-text); text-align: left; }
+.analysis-variant.is-selected { border-color: var(--color-accent); background: #3b3b32; box-shadow: inset 0 0 0 1px #d3a86744; }
+.analysis-variant-title { color: var(--color-accent); font-size: .76rem; font-weight: 750; }
+.analysis-variant .analysis-variant-line { color: var(--color-text); font-size: .68rem; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.analysis-actions { position: sticky; bottom: 0; display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; padding-top: .1rem; background: #19272e; }
+.analysis-actions .reset-button { min-width: 0; padding-inline: .35rem; font-size: .76rem; }
+.square.analysis-from { box-shadow: inset 0 0 0 4px #d7a94e; }
+.square.analysis-to { box-shadow: inset 0 0 0 4px #72c4a1; }
 .control-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; }
 .control-buttons .reset-button { min-width: 0; margin-top: 0; padding-inline: .35rem; font-size: .82rem; }
 .position-file-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; margin-top: .6rem; }
@@ -147,6 +160,7 @@ h1 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.5rem); font-weight: 650; letter-
   .clock-player { font-size: .68rem; }
   .clock-status { font-size: .57rem; }
   .clock-time { font-size: .88rem; letter-spacing: 0; }
+  .analysis-variants { max-height: 30vh; }
 }
 
 @media (min-width: 761px) and (max-width: 1140px) {

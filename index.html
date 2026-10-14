@@ -99,6 +99,20 @@
           <button id="load-in-design-button" class="reset-button" type="button" hidden>Cargar en Modo Diseño</button>
         </section>
         <p class="panel-note">El tablero está listo para una nueva partida.</p>
+        <button id="analyze-button" class="reset-button" type="button" aria-controls="analysis-panel">
+          <span aria-hidden="true">⌕</span> Analizar
+        </button>
+        <section id="analysis-panel" class="analysis-panel" aria-label="Análisis de posición" hidden>
+          <div class="analysis-heading">
+            <h2>Análisis</h2>
+            <p id="analysis-status" role="status" aria-live="polite">Preparando motor…</p>
+          </div>
+          <ol id="analysis-variants" class="analysis-variants" aria-label="Mejores variantes"></ol>
+          <div class="analysis-actions">
+            <button id="accept-analysis-move" class="reset-button primary-button" type="button" disabled>Aceptar jugada</button>
+            <button id="cancel-analysis" class="reset-button" type="button">Cancelar</button>
+          </div>
+        </section>
         <div class="control-buttons" role="group" aria-label="Mostrar control de casillas">
           <button id="white-control-button" class="reset-button control-button" type="button" aria-pressed="false" aria-label="Mostrar control de las piezas blancas">
             <span aria-hidden="true">◉</span><span>Control blancas</span>

@@ -29,6 +29,12 @@ const resetButton = document.querySelector("#reset-button");
 const rotateBoardButton = document.querySelector("#rotate-board-button");
 const whiteControlButton = document.querySelector("#white-control-button");
 const blackControlButton = document.querySelector("#black-control-button");
+const analyzeButton = document.querySelector("#analyze-button");
+const analysisPanel = document.querySelector("#analysis-panel");
+const analysisStatus = document.querySelector("#analysis-status");
+const analysisVariants = document.querySelector("#analysis-variants");
+const acceptAnalysisMoveButton = document.querySelector("#accept-analysis-move");
+const cancelAnalysisButton = document.querySelector("#cancel-analysis");
 const chessClocksElement = document.querySelector("#chess-clocks");
 const files = "abcdefgh";
 const pieceNames = { k: "rey", q: "dama", r: "torre", b: "alfil", n: "caballo", p: "peón" };
@@ -61,6 +67,9 @@ let designTurn = "w";
 let designTool = { type: "q", color: "w" };
 let pendingDesignLoad = null;
 const designPieceTypes = ["k", "q", "r", "b", "n", "p"];
+const STOCKFISH_SEARCH_DEPTH = 12;
+const STOCKFISH_SEARCH_TIMEOUT = 45000;
+const STOCKFISH_WORKER_URL = new URL("../engine/stockfish-18-lite-single.js", import.meta.url);
 const chessClock = {
   elapsed: { w: 0, b: 0 },
   activeColor: null,
@@ -69,6 +78,13 @@ const chessClock = {
   intervalId: null,
 };
 let displayedClockSeconds = { w: null, b: null };
+let stockfishWorker = null;
+let stockfishReadyPromise = null;
+let stockfishHandshake = null;
+let stockfishReadyWaiter = null;
+let stockfishSearchInProgress = false;
+let stockfishSearchTimer = null;
+let analysisState = null;
 
 function toSquareName(row, column) {
   return `${files[column]}${8 - row}`;
@@ -308,7 +324,9 @@ function renderPiece(piece, square, coordinate) {
 }
 
 function renderBoard() {
+  refreshAnalysisPositionState();
   const position = isDesignMode ? designPosition : game.board();
+  const analysisMove = analysisState?.selectedMove;
   controlMap = controlViewColor ? calculateControlMap(position, controlViewColor) : null;
   const checkSquare = !isDesignMode && game.isCheck() ? getKingSquare(game.turn(), position) : null;
   const legalDestinations = new Map((isDesignMode ? [] : legalMoves).map((move) => [move.to, move]));
@@ -328,6 +346,8 @@ function renderBoard() {
       if (coordinate === selectedSquare) classes.push("selected");
       if (!isDesignMode && (coordinate === lastMove?.from || coordinate === lastMove?.to)) classes.push("last-move");
       if (coordinate === checkSquare) classes.push("in-check");
+      if (coordinate === analysisMove?.from) classes.push("analysis-from");
+      if (coordinate === analysisMove?.to) classes.push("analysis-to");
       if (legalDestinations.has(coordinate)) {
         classes.push(legalDestinations.get(coordinate).captured ? "legal-capture" : "legal-destination");
       }
@@ -412,10 +432,10 @@ function selectPiece(square) {
   renderBoard();
 }
 
-function makeMove(from, to) {
+function makeMove(from, to, promotion = "q") {
   try {
     const moverColor = game.turn();
-    const move = game.move({ from, to, promotion: "q" });
+    const move = game.move({ from, to, promotion });
     switchClock(moverColor, game.turn());
     lastMove = { from: move.from, to: move.to };
     clearSelection();
@@ -882,6 +902,422 @@ function toggleControlView(color) {
   controlViewColor = controlViewColor === color ? null : color;
   renderBoard();
 }
+
+function currentPositionFen() {
+  return isDesignMode
+    ? positionToFen(designPosition, designTurn)
+    : game.fen({ forceEnpassantSquare: true });
+}
+
+function setAnalysisStatus(message) {
+  analysisStatus.textContent = message;
+}
+
+function updateAnalysisControls() {
+  analyzeButton.disabled = stockfishSearchInProgress || Boolean(stockfishHandshake) || Boolean(stockfishReadyWaiter)
+    || analysisState?.status === "loading" || analysisState?.status === "searching";
+  acceptAnalysisMoveButton.disabled = analysisState?.status !== "ready";
+}
+
+function clearAnalysisVariants() {
+  analysisVariants.replaceChildren();
+  acceptAnalysisMoveButton.disabled = true;
+}
+
+function closeAnalysisPanel() {
+  if (stockfishSearchInProgress && stockfishWorker) {
+    try {
+      stockfishWorker.postMessage("stop");
+    } catch {
+      handleStockfishFailure("No se pudo detener el análisis.");
+    }
+  }
+  analysisState = null;
+  analysisPanel.hidden = true;
+  clearAnalysisVariants();
+  updateAnalysisControls();
+  renderBoard();
+}
+
+function markAnalysisStale() {
+  if (!analysisState || analysisState.status === "stale") return;
+  analysisState.status = "stale";
+  analysisState.variants = [];
+  analysisState.selectedMove = null;
+  clearAnalysisVariants();
+  setAnalysisStatus("La posición cambió. Vuelve a analizar antes de aceptar una jugada.");
+  if (stockfishSearchInProgress && stockfishWorker) {
+    try {
+      stockfishWorker.postMessage("stop");
+    } catch {
+      handleStockfishFailure("No se pudo detener el análisis obsoleto.");
+    }
+  }
+  updateAnalysisControls();
+}
+
+function refreshAnalysisPositionState() {
+  if (!analysisState || !analysisState.snapshotFen || analysisState.status === "stale") return;
+  if (analysisState.inDesignMode !== isDesignMode || analysisState.snapshotFen !== currentPositionFen()) {
+    markAnalysisStale();
+  }
+}
+
+function handleStockfishFailure(message) {
+  if (stockfishSearchTimer !== null) {
+    window.clearTimeout(stockfishSearchTimer);
+    stockfishSearchTimer = null;
+  }
+  const error = new Error(message);
+  const worker = stockfishWorker;
+  stockfishWorker = null;
+  stockfishReadyPromise = null;
+  stockfishSearchInProgress = false;
+  if (stockfishHandshake) {
+    window.clearTimeout(stockfishHandshake.timer);
+    const { reject } = stockfishHandshake;
+    stockfishHandshake = null;
+    reject(error);
+  }
+  if (stockfishReadyWaiter) {
+    window.clearTimeout(stockfishReadyWaiter.timer);
+    const { reject } = stockfishReadyWaiter;
+    stockfishReadyWaiter = null;
+    reject(error);
+  }
+  worker?.terminate();
+  if (analysisState) {
+    analysisState.status = "error";
+    analysisState.variants = [];
+    analysisState.selectedMove = null;
+    clearAnalysisVariants();
+    setAnalysisStatus(`No se pudo usar Stockfish: ${message}`);
+  }
+  updateAnalysisControls();
+  renderBoard();
+}
+
+function ensureStockfishReady() {
+  if (stockfishReadyPromise) return stockfishReadyPromise;
+
+  stockfishReadyPromise = new Promise((resolve, reject) => {
+    try {
+      stockfishWorker = new Worker(STOCKFISH_WORKER_URL, { name: "stockfish-analysis" });
+    } catch (error) {
+      stockfishReadyPromise = null;
+      reject(error);
+      return;
+    }
+
+    stockfishWorker.addEventListener("message", (event) => handleStockfishMessage(String(event.data)));
+    stockfishWorker.addEventListener("error", (event) => {
+      event.preventDefault();
+      handleStockfishFailure(event.message || "El Worker del motor ha fallado.");
+    });
+    stockfishWorker.addEventListener("messageerror", () => handleStockfishFailure("El motor envió una respuesta que no se pudo leer."));
+    stockfishHandshake = {
+      stage: "uci",
+      resolve,
+      reject,
+      timer: window.setTimeout(() => handleStockfishFailure("Stockfish tardó demasiado en inicializarse."), 30000),
+    };
+    stockfishWorker.postMessage("uci");
+  });
+
+  return stockfishReadyPromise;
+}
+
+function waitForStockfishReady() {
+  return new Promise((resolve, reject) => {
+    if (!stockfishWorker || stockfishReadyWaiter) {
+      reject(new Error("El motor no está disponible para iniciar una búsqueda."));
+      return;
+    }
+    stockfishReadyWaiter = {
+      resolve,
+      reject,
+      timer: window.setTimeout(() => handleStockfishFailure("Stockfish no respondió a tiempo."), 15000),
+    };
+    stockfishWorker.postMessage("isready");
+  });
+}
+
+function parseStockfishInfo(line) {
+  if (!line.startsWith("info ") || /\b(?:lowerbound|upperbound)\b/.test(line)) return;
+  const depth = Number(line.match(/\bdepth (\d+)\b/)?.[1]);
+  const multipv = Number(line.match(/\bmultipv (\d+)\b/)?.[1] ?? 1);
+  const score = line.match(/\bscore (cp|mate) (-?\d+)\b/);
+  const pv = line.match(/\bpv (.+)$/);
+  if (!depth || !multipv || !score || !pv || !analysisState || analysisState.status !== "searching") return;
+  const previous = analysisState.lines.get(multipv);
+  if (!previous || depth >= previous.depth) {
+    analysisState.lines.set(multipv, {
+      depth,
+      scoreType: score[1],
+      score: Number(score[2]),
+      pv: pv[1].trim(),
+    });
+  }
+}
+
+function handleStockfishMessage(line) {
+  if (line === "uciok" && stockfishHandshake?.stage === "uci") {
+    stockfishHandshake.stage = "ready";
+    stockfishWorker.postMessage("setoption name Threads value 1");
+    stockfishWorker.postMessage("isready");
+    return;
+  }
+  if (line === "readyok") {
+    if (stockfishHandshake?.stage === "ready") {
+      window.clearTimeout(stockfishHandshake.timer);
+      const { resolve } = stockfishHandshake;
+      stockfishHandshake = null;
+      resolve();
+      updateAnalysisControls();
+    } else if (stockfishReadyWaiter) {
+      window.clearTimeout(stockfishReadyWaiter.timer);
+      const { resolve } = stockfishReadyWaiter;
+      stockfishReadyWaiter = null;
+      resolve();
+      updateAnalysisControls();
+    }
+    return;
+  }
+  if (line.startsWith("info ")) {
+    parseStockfishInfo(line);
+    return;
+  }
+  if (line.startsWith("bestmove ")) finishStockfishSearch();
+}
+
+function parseUciMove(uciMove) {
+  const match = uciMove.match(/^([a-h][1-8])([a-h][1-8])([qrbn])?$/);
+  if (!match) throw new Error("Stockfish devolvió una jugada con formato no reconocido.");
+  return { from: match[1], to: match[2], ...(match[3] ? { promotion: match[3] } : {}) };
+}
+
+function convertPrincipalVariationToSan(fen, pv) {
+  const position = new Chess(fen);
+  const moves = [];
+  for (const uciMove of pv.split(/\s+/).slice(0, 12)) {
+    const move = position.move(parseUciMove(uciMove));
+    if (!move) throw new Error("La variante devuelta por Stockfish no es legal en esta posición.");
+    moves.push(move);
+  }
+  if (!moves.length) throw new Error("Stockfish no devolvió una secuencia de jugadas.");
+
+  const fields = fen.split(/\s+/);
+  let turn = fields[1];
+  let moveNumber = Number(fields[5]) || 1;
+  const sanMoves = moves.map((move, index) => {
+    if (turn === "w") {
+      turn = "b";
+      return `${moveNumber}. ${move.san}`;
+    }
+    const prefix = index === 0 ? `${moveNumber}... ` : "";
+    turn = "w";
+    moveNumber += 1;
+    return `${prefix}${move.san}`;
+  });
+
+  return { firstMove: parseUciMove(pv.split(/\s+/)[0]), sanLine: sanMoves.join(" ") };
+}
+
+function formatStockfishScore(line, rootColor) {
+  const whiteScore = rootColor === "w" ? line.score : -line.score;
+  const sign = whiteScore > 0 ? "+" : whiteScore < 0 ? "−" : "";
+  if (line.scoreType === "mate") {
+    const side = whiteScore > 0 ? "blancas" : "negras";
+    return `${sign}M${Math.abs(whiteScore)} · mate para ${side}`;
+  }
+  const advantage = whiteScore === 0 ? "igualdad" : `ventaja ${whiteScore > 0 ? "blancas" : "negras"}`;
+  return `${sign}${(whiteScore / 100).toFixed(2)} · ${advantage}`;
+}
+
+function selectAnalysisVariant(rank) {
+  if (!analysisState || analysisState.status !== "ready") return;
+  const variant = analysisState.variants.find((item) => item.rank === rank);
+  if (!variant) return;
+  analysisState.selectedRank = rank;
+  analysisState.selectedMove = variant.firstMove;
+  renderAnalysisVariants();
+  renderBoard();
+}
+
+function renderAnalysisVariants() {
+  if (!analysisState) return;
+  analysisVariants.replaceChildren(...analysisState.variants.map((variant) => {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    const title = document.createElement("span");
+    const line = document.createElement("span");
+    button.type = "button";
+    button.className = `reset-button analysis-variant${variant.rank === analysisState.selectedRank ? " is-selected" : ""}`;
+    button.setAttribute("aria-pressed", String(variant.rank === analysisState.selectedRank));
+    button.addEventListener("click", () => selectAnalysisVariant(variant.rank));
+    title.className = "analysis-variant-title";
+    title.textContent = `Variante ${variant.rank} · ${variant.evaluation}`;
+    line.className = "analysis-variant-line";
+    line.textContent = variant.sanLine;
+    button.append(title, line);
+    item.append(button);
+    return item;
+  }));
+  acceptAnalysisMoveButton.disabled = analysisState.status !== "ready";
+}
+
+function finishStockfishSearch() {
+  stockfishSearchInProgress = false;
+  if (stockfishSearchTimer !== null) {
+    window.clearTimeout(stockfishSearchTimer);
+    stockfishSearchTimer = null;
+  }
+  if (!analysisState || analysisState.status !== "searching") {
+    updateAnalysisControls();
+    return;
+  }
+  if (analysisState.snapshotFen !== currentPositionFen() || analysisState.inDesignMode !== isDesignMode) {
+    markAnalysisStale();
+    updateAnalysisControls();
+    return;
+  }
+
+  const lines = [...analysisState.lines.entries()]
+    .filter(([, line]) => line.depth >= STOCKFISH_SEARCH_DEPTH)
+    .sort(([rankA], [rankB]) => rankA - rankB);
+  if (lines.length < analysisState.expectedLines) {
+    analysisState.status = "error";
+    setAnalysisStatus("El motor no terminó todas las variantes solicitadas. Inténtalo de nuevo.");
+    clearAnalysisVariants();
+    updateAnalysisControls();
+    return;
+  }
+
+  try {
+    analysisState.variants = lines.map(([rank, line]) => {
+      const variation = convertPrincipalVariationToSan(analysisState.snapshotFen, line.pv);
+      return {
+        rank,
+        ...variation,
+        firstSan: variation.sanLine.split(/\s+/).slice(0, 2).join(" "),
+        sanLine: variation.sanLine,
+        evaluation: formatStockfishScore(line, analysisState.sideToMove),
+      };
+    });
+    analysisState.status = "ready";
+    analysisState.selectedRank = analysisState.variants[0].rank;
+    analysisState.selectedMove = analysisState.variants[0].firstMove;
+    setAnalysisStatus(`Análisis completo a profundidad ${STOCKFISH_SEARCH_DEPTH}. Selecciona una variante.`);
+    renderAnalysisVariants();
+    renderBoard();
+  } catch (error) {
+    analysisState.status = "error";
+    analysisState.variants = [];
+    analysisState.selectedMove = null;
+    clearAnalysisVariants();
+    setAnalysisStatus(`No se pudo interpretar la respuesta del motor: ${error.message}`);
+    renderBoard();
+  }
+  updateAnalysisControls();
+}
+
+async function analyzeCurrentPosition() {
+  if (stockfishSearchInProgress || analysisState?.status === "loading" || analysisState?.status === "searching") return;
+  const fen = currentPositionFen();
+  analysisState = {
+    snapshotFen: fen,
+    inDesignMode: isDesignMode,
+    sideToMove: fen.split(/\s+/)[1],
+    status: "loading",
+    lines: new Map(),
+    variants: [],
+    selectedMove: null,
+  };
+  analysisPanel.hidden = false;
+  clearAnalysisVariants();
+  setAnalysisStatus("Preparando motor…");
+  updateAnalysisControls();
+
+  try {
+    const validation = validateFen(fen);
+    if (!validation.ok) throw new Error(`La posición FEN no es válida: ${validation.error}`);
+    const position = new Chess(fen);
+    const legalMoves = position.moves({ verbose: true });
+    if (!legalMoves.length) throw new Error("La posición no tiene jugadas legales que analizar.");
+    analysisState.expectedLines = Math.min(3, legalMoves.length);
+    await ensureStockfishReady();
+    if (!analysisState || analysisState.status !== "loading") return;
+    if (analysisState.snapshotFen !== currentPositionFen() || analysisState.inDesignMode !== isDesignMode) {
+      markAnalysisStale();
+      return;
+    }
+    stockfishWorker.postMessage(`setoption name MultiPV value ${analysisState.expectedLines}`);
+    await waitForStockfishReady();
+    if (!analysisState || analysisState.status !== "loading") return;
+    if (analysisState.snapshotFen !== currentPositionFen() || analysisState.inDesignMode !== isDesignMode) {
+      markAnalysisStale();
+      return;
+    }
+    analysisState.status = "searching";
+    stockfishSearchInProgress = true;
+    setAnalysisStatus("Analizando posición…");
+    updateAnalysisControls();
+    stockfishWorker.postMessage(`position fen ${fen}`);
+    stockfishWorker.postMessage(`go depth ${STOCKFISH_SEARCH_DEPTH}`);
+    stockfishSearchTimer = window.setTimeout(() => handleStockfishFailure("El motor superó el tiempo máximo de análisis."), STOCKFISH_SEARCH_TIMEOUT);
+  } catch (error) {
+    if (!analysisState || analysisState.status === "stale") return;
+    analysisState.status = "error";
+    clearAnalysisVariants();
+    setAnalysisStatus(error.message || "No se pudo analizar esta posición.");
+    updateAnalysisControls();
+  }
+}
+
+function acceptSelectedAnalysisMove() {
+  if (!analysisState || analysisState.status !== "ready") return;
+  if (analysisState.inDesignMode !== isDesignMode || analysisState.snapshotFen !== currentPositionFen()) {
+    markAnalysisStale();
+    return;
+  }
+  const variant = analysisState.variants.find((item) => item.rank === analysisState.selectedRank);
+  if (!variant) return;
+  const move = variant.firstMove;
+  const moveOptions = { from: move.from, to: move.to, ...(move.promotion ? { promotion: move.promotion } : {}) };
+
+  if (isDesignMode) {
+    try {
+      const candidate = new Chess(analysisState.snapshotFen);
+      if (!candidate.move(moveOptions)) throw new Error("La jugada ya no es legal en esta posición.");
+      const nextPosition = clonePosition(candidate.board());
+      const nextTurn = candidate.turn();
+      closeAnalysisPanel();
+      designPosition = nextPosition;
+      designTurn = nextTurn;
+      designTurnSelect.value = nextTurn;
+      hideDesignMessage();
+      renderBoard();
+    } catch (error) {
+      analysisState.status = "error";
+      setAnalysisStatus(error.message);
+      updateAnalysisControls();
+    }
+    return;
+  }
+
+  const legalMove = game.moves({ verbose: true }).find((candidate) =>
+    candidate.from === move.from && candidate.to === move.to && (candidate.promotion ?? null) === (move.promotion ?? null));
+  if (!legalMove) {
+    markAnalysisStale();
+    return;
+  }
+  closeAnalysisPanel();
+  makeMove(move.from, move.to, move.promotion || "q");
+}
+
+analyzeButton.addEventListener("click", analyzeCurrentPosition);
+acceptAnalysisMoveButton.addEventListener("click", acceptSelectedAnalysisMove);
+cancelAnalysisButton.addEventListener("click", closeAnalysisPanel);
 
 boardElement.addEventListener("click", (event) => {
   if (suppressClick && event.detail > 0) {

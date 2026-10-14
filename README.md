@@ -16,12 +16,13 @@ Aplicación web de ajedrez para dos personas en el mismo dispositivo. Presenta u
 - Cargar archivos FEN locales; en Juego se validan antes de sustituir la partida y, si no puede iniciarse, se ofrece abrirlos en Modo Diseño.
 - Crear posiciones personalizadas en Modo Diseño: colocar piezas de ambos colores, arrastrarlas, eliminarlas, vaciar el tablero o restaurar la posición inicial.
 - Validar reyes, jaques, jaque mate, ahogado y movimientos legales antes de iniciar una partida desde una posición editada.
+- Analizar la posición actual o una posición personalizada con Stockfish.js y consultar hasta tres variantes con evaluación, secuencia SAN y opción para aplicar solo la primera jugada.
 - Elegir el bando que juega primero. La validación estricta avisa de que el editor no conserva historial y no puede certificar la legalidad histórica de una posición.
 - Usar una interfaz adaptable a escritorio y móvil, con piezas SVG locales.
 
 ## Tecnologías
 
-El proyecto utiliza HTML5, CSS3 y JavaScript vanilla. No requiere Node.js, npm, frameworks ni backend. La aplicación carga `chess.js` como módulo ESM desde jsDelivr, por lo que se necesita conexión a Internet para iniciar la partida. Las piezas se cargan desde la carpeta local `pieces/`. FEN conserva la posición, el turno, los derechos de enroque, la casilla al paso y los contadores; no almacena el historial completo ni el tiempo de los relojes.
+El proyecto utiliza HTML5, CSS3 y JavaScript vanilla. No requiere Node.js, npm, frameworks ni backend. La aplicación carga `chess.js` como módulo ESM desde jsDelivr, por lo que se necesita conexión a Internet para iniciar la partida. Stockfish.js 18.0.8 lite de un hilo se carga bajo demanda desde `engine/` y se ejecuta en un Web Worker; el JavaScript y WASM ocupan unos 7,3 MB en total. El motor incluye su licencia GPLv3 en `engine/Copying.txt`; consulta `engine/README.md` para la atribución y la fuente. Las piezas se cargan desde la carpeta local `pieces/`. FEN conserva la posición, el turno, los derechos de enroque, la casilla al paso y los contadores; no almacena el historial completo ni el tiempo de los relojes.
 
 ## Cómo abrir
 
@@ -32,6 +33,7 @@ Como JavaScript importa módulos, sirve la carpeta `ajedrez` mediante un servido
 - `index.html`: estructura de la página y controles de la partida.
 - `css/style.css`: estilos, tablero y diseño responsive.
 - `js/script.js`: estado de la partida, interacción, controles y reloj.
+- `engine/`: compilación para navegador de Stockfish.js y su licencia.
 - `pieces/`: archivos SVG de las doce piezas.
 
 Los SVG incluidos pertenecen al conjunto Maestro de [lichess-org/lila](https://github.com/lichess-org/lila/tree/master/public/piece/maestro). Consulta [pieces/README.md](pieces/README.md) para la atribución y licencia.
