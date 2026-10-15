@@ -6,13 +6,30 @@ const settingsButton = document.querySelector("#settings-button");
 const settingsBackdrop = document.querySelector("#settings-dialog");
 const settingsModal = settingsBackdrop.querySelector(".settings-modal");
 const settingsCloseButton = document.querySelector("#settings-close");
+const welcomeHeaderButton = document.querySelector("#welcome-header-button");
+const welcomeBackdrop = document.querySelector("#welcome-backdrop");
+const welcomeDialog = document.querySelector("#welcome-dialog");
+const welcomeCloseButton = document.querySelector("#welcome-close");
+const welcomeAcceptButton = document.querySelector("#welcome-accept");
+const welcomeDismissCheckbox = document.querySelector("#welcome-dismiss");
+const welcomeLink = document.querySelector("#welcome-link");
+const WELCOME_DISMISSED_KEY = "qchessWelcomeDismissed";
+let welcomeOpener = null;
 const themeOptions = [...document.querySelectorAll(".board-theme-option")];
 const showClockSetting = document.querySelector("#show-clock-setting");
+const showControlButtonsSetting = document.querySelector("#show-control-buttons-setting");
+const controlButtonsElement = document.querySelector(".control-buttons");
+const whitePlayerModeButton = document.querySelector("#white-player-mode-button");
+const blackPlayerModeButton = document.querySelector("#black-player-mode-button");
 const pieceStyleOptions = document.querySelector("#piece-style-options");
 const pieceStyleStatus = document.querySelector("#piece-style-status");
 let preferences = readPreferences();
 let activePieceStyle = preferences.pieceStyle;
 let pieceStyleRequestId = 0;
+let automaticPlayers = { w: preferences.whiteAutoPlay, b: preferences.blackAutoPlay };
+const automaticPlayerGeneration = { w: 0, b: 0 };
+let automaticMoveInProgress = false;
+let deferredAutomaticMove = null;
 
 function applyBoardTheme(themeName) {
   const theme = BOARD_THEMES[themeName] || BOARD_THEMES.classic;
@@ -34,10 +51,109 @@ function closeSettings() {
   settingsButton.focus();
 }
 
+function isWelcomeDismissed() {
+  try {
+    return window.localStorage.getItem(WELCOME_DISMISSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function openWelcomeModal(opener = null) {
+  if (!welcomeBackdrop.hidden) return;
+  welcomeOpener = opener instanceof HTMLElement ? opener : null;
+  welcomeDismissCheckbox.checked = isWelcomeDismissed();
+  welcomeBackdrop.hidden = false;
+  document.body.classList.add("welcome-open");
+  welcomeAcceptButton.focus();
+}
+
+function closeWelcomeModal() {
+  if (welcomeBackdrop.hidden) return;
+  if (welcomeDismissCheckbox.checked) {
+    try {
+      window.localStorage.setItem(WELCOME_DISMISSED_KEY, "true");
+    } catch {
+      // El modal sigue siendo utilizable aunque el navegador bloquee el almacenamiento.
+    }
+  }
+  welcomeBackdrop.hidden = true;
+  document.body.classList.remove("welcome-open");
+  const focusTarget = welcomeOpener instanceof HTMLElement && welcomeOpener.isConnected ? welcomeOpener : welcomeLink;
+  focusTarget.focus();
+  welcomeOpener = null;
+}
+
+welcomeCloseButton.addEventListener("click", closeWelcomeModal);
+welcomeAcceptButton.addEventListener("click", closeWelcomeModal);
+welcomeLink.addEventListener("click", (event) => {
+  event.preventDefault();
+  openWelcomeModal(welcomeLink);
+});
+welcomeHeaderButton.addEventListener("click", () => openWelcomeModal(welcomeHeaderButton));
+welcomeDialog.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeWelcomeModal();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [welcomeCloseButton, welcomeDismissCheckbox, welcomeAcceptButton];
+  if (event.shiftKey && document.activeElement === focusable[0]) {
+    event.preventDefault();
+    focusable.at(-1).focus();
+  } else if (!event.shiftKey && document.activeElement === focusable.at(-1)) {
+    event.preventDefault();
+    focusable[0].focus();
+  }
+});
+
 function applyClockVisibility(showClock) {
   chessClocksElement.hidden = !showClock;
   showClockSetting.checked = showClock;
   if (showClock) updateClockDisplay(true);
+}
+
+function applyControlButtonsVisibility(showControlButtons) {
+  showControlButtonsSetting.checked = showControlButtons;
+  controlButtonsElement.hidden = !showControlButtons;
+}
+
+function renderPlayerModeButtons() {
+  [["w", whitePlayerModeButton], ["b", blackPlayerModeButton]].forEach(([color, button]) => {
+    const side = color === "w" ? "Blancas" : "Negras";
+    const mode = automaticPlayers[color] ? "automático" : "modo manual";
+    button.querySelector(".player-mode-label").textContent = `${side}: ${mode}`;
+    button.setAttribute("aria-label", `${side}: ${mode}`);
+    button.setAttribute("aria-pressed", String(automaticPlayers[color]));
+  });
+}
+
+function togglePlayerMode(color) {
+  automaticPlayers[color] = !automaticPlayers[color];
+  automaticPlayerGeneration[color] += 1;
+  if (deferredAutomaticMove?.job.sideToMove === color) deferredAutomaticMove = null;
+  preferences = updatePreference(preferences, color === "w" ? "whiteAutoPlay" : "blackAutoPlay", automaticPlayers[color]);
+  renderPlayerModeButtons();
+  updateAnalysisControls();
+  if (isDesignMode || game.turn() !== color || !automaticPlayers[color]) return;
+
+  const fen = game.fen({ forceEnpassantSquare: true });
+  const activeJob = [activeStockfishJob, preparingStockfishJob, pendingAutomaticJob].find((job) =>
+    job?.kind === "automatic" && job.id === automaticEvaluation.requestId && job.fen === fen);
+  if (activeJob) {
+    activeJob.playerGeneration = automaticPlayerGeneration[color];
+    return;
+  }
+  if (automaticEvaluation.fen === fen && automaticEvaluation.status === "ready" && automaticEvaluation.principalVariation) {
+    deferredAutomaticMove = {
+      job: { kind: "automatic", id: automaticEvaluation.requestId, fen, sideToMove: color, playerGeneration: automaticPlayerGeneration[color] },
+      pv: automaticEvaluation.principalVariation,
+    };
+    maybeApplyDeferredAutomaticMove();
+    return;
+  }
+  scheduleAutomaticEvaluation();
 }
 
 function renderPieceStyleOptions(availableStyles = Object.keys(PIECE_STYLES)) {
@@ -139,12 +255,21 @@ showClockSetting.addEventListener("change", () => {
   preferences = updatePreference(preferences, "showClock", showClockSetting.checked);
   applyClockVisibility(preferences.showClock);
 });
+showControlButtonsSetting.addEventListener("change", () => {
+  preferences = updatePreference(preferences, "showControlButtons", showControlButtonsSetting.checked);
+  applyControlButtonsVisibility(preferences.showControlButtons);
+});
+whitePlayerModeButton.addEventListener("click", () => togglePlayerMode("w"));
+blackPlayerModeButton.addEventListener("click", () => togglePlayerMode("b"));
 
 const boardElement = document.querySelector("#chessboard");
 const boardFilesTop = document.querySelector(".board-files-top");
 const boardFilesBottom = document.querySelector(".board-files-bottom");
 const boardRanksLeft = document.querySelector(".board-ranks-left");
 const boardRanksRight = document.querySelector(".board-ranks-right");
+const capturedTop = document.querySelector("#captured-top");
+const capturedBottom = document.querySelector("#captured-bottom");
+const materialBalance = document.querySelector("#material-balance");
 const designTools = document.querySelector("#design-tools");
 const enterDesignButton = document.querySelector("#enter-design-button");
 const designTurnButton = document.querySelector("#design-turn-button");
@@ -190,6 +315,7 @@ const cancelPromotionTextButton = document.querySelector("#cancel-promotion-text
 const files = "abcdefgh";
 const pieceNames = { k: "rey", q: "dama", r: "torre", b: "alfil", n: "caballo", p: "pe\u00f3n" };
 const pieceColors = { w: "white", b: "black" };
+const capturedPieceValues = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const clockViews = {
   w: {
     card: document.querySelector("#white-clock"),
@@ -204,6 +330,7 @@ const clockViews = {
 };
 
 let game = new Chess();
+let captureHistoryComplete = true;
 let selectedSquare = null;
 let legalMoves = [];
 let lastMove = null;
@@ -251,6 +378,8 @@ let automaticEvaluationRequestId = 0;
 let automaticEvaluation = { fen: null, status: "idle", scoreType: null, score: 0, depth: 0 };
 
 applyClockVisibility(preferences.showClock);
+applyControlButtonsVisibility(preferences.showControlButtons);
+renderPlayerModeButtons();
 
 function toSquareName(row, column) {
   return `${files[column]}${8 - row}`;
@@ -509,7 +638,7 @@ function cancelDesignTool() {
 }
 
 function handleDesignToolKeydown(event) {
-  if (event.key !== "Escape" || !settingsBackdrop.hidden || !isDesignMode
+  if (event.key !== "Escape" || !settingsBackdrop.hidden || !welcomeBackdrop.hidden || !isDesignMode
     || (designTool.type === null && !designEraseMode)) return;
   event.preventDefault();
   cancelDesignTool();
@@ -571,6 +700,65 @@ function renderPiece(piece, square, coordinate) {
   square.append(image);
 }
 
+function renderCapturedMaterial() {
+  if (isDesignMode) {
+    capturedTop.hidden = true;
+    capturedBottom.hidden = true;
+    materialBalance.hidden = true;
+    return;
+  }
+
+  const captures = { w: [], b: [] };
+  const totals = { w: 0, b: 0 };
+  game.history({ verbose: true }).forEach((move) => {
+    if (!move.captured || !Object.hasOwn(capturedPieceValues, move.captured)) return;
+    const capturedColor = move.color === "w" ? "b" : "w";
+    captures[move.color].push({ color: capturedColor, type: move.captured });
+    totals[move.color] += capturedPieceValues[move.captured];
+  });
+
+  const renderCollection = (container, playerColor) => {
+    const pieces = captures[playerColor];
+    const capturedTotal = totals[playerColor];
+    const playerName = playerColor === "w" ? "blancas" : "negras";
+    const historyDescription = captureHistoryComplete ? "en esta partida" : "desde la posición cargada; el historial anterior es desconocido";
+    const pieceList = document.createElement("span");
+    pieceList.className = "captured-piece-list";
+    pieceList.setAttribute("aria-hidden", "true");
+    pieces.forEach(({ color, type }) => {
+      const image = document.createElement("img");
+      image.className = "captured-piece";
+      image.dataset.pieceColor = color;
+      image.dataset.pieceType = type;
+      image.src = resolvePieceAsset(activePieceStyle, color, type);
+      image.alt = "";
+      image.draggable = false;
+      pieceList.append(image);
+    });
+    const value = document.createElement("span");
+    value.className = "captured-value";
+    value.textContent = captureHistoryComplete ? `+${capturedTotal}` : pieces.length ? `+${capturedTotal}*` : "—";
+    value.setAttribute("aria-hidden", "true");
+    container.replaceChildren(pieceList, value);
+    container.hidden = false;
+    container.setAttribute("aria-label", `Capturas de las ${playerName}: ${pieces.length} piezas, valor ${capturedTotal}, ${historyDescription}.`);
+    container.title = `Capturas de las ${playerName}: ${value.textContent}${captureHistoryComplete ? "" : "; total previo desconocido"}`;
+  };
+
+  renderCollection(capturedTop, boardFlipped ? "w" : "b");
+  renderCollection(capturedBottom, boardFlipped ? "b" : "w");
+
+  if (!captureHistoryComplete) {
+    materialBalance.textContent = "Material: historial previo desconocido";
+  } else {
+    const difference = totals.w - totals.b;
+    materialBalance.textContent = difference === 0
+      ? "Material igualado"
+      : `Material: +${Math.abs(difference)} ${difference > 0 ? "blancas" : "negras"}`;
+  }
+  materialBalance.hidden = false;
+}
+
 function createMoveAnimationSprite(from, to) {
   const sourceImage = boardElement.querySelector(`[data-square="${from}"] .piece-image`);
   const destinationSquare = boardElement.querySelector(`[data-square="${to}"]`);
@@ -615,6 +803,7 @@ function finishMoveAnimation(state) {
   document.body.classList.remove("move-animation-active");
   updateAnalysisControls();
   renderBoard();
+  maybeApplyDeferredAutomaticMove();
 }
 
 function cancelMoveAnimation(render = true) {
@@ -661,6 +850,7 @@ function renderBoard() {
   chessClocksElement.classList.toggle("flipped", boardFlipped);
   renderAutomaticEvaluation();
   renderCoordinates();
+  renderCapturedMaterial();
   boardElement.replaceChildren();
 
   for (let row = 0; row < 8; row += 1) {
@@ -710,6 +900,7 @@ function renderBoard() {
   blackControlButton.classList.toggle("is-active", controlViewColor === "b");
   panelNote.textContent = isDesignMode ? "Modo Diseño activo. Selecciona una pieza y una casilla para editar la posición." : getGameMessage();
   updatePromotionSelectorPosition();
+  updateAnalysisControls();
 }
 
 function turnCardDesignState(active) {
@@ -804,7 +995,7 @@ function openPromotionSelector(from, to, promotionMoves) {
 }
 
 function makeMove(from, to, promotion = null) {
-  if (isDesignMode || moveAnimationState || pendingPromotion) return false;
+  if (isDesignMode || moveAnimationState || pendingPromotion || (automaticPlayers[game.turn()] && !automaticMoveInProgress)) return false;
   const destinationMoves = game.moves({ square: from, verbose: true }).filter((move) => move.to === to);
   if (!destinationMoves.length) return false;
   if (destinationMoves.some((move) => move.promotion) && promotion === null) {
@@ -837,6 +1028,7 @@ function handleSquareClick(coordinate) {
     handleDesignSquareClick(coordinate);
     return;
   }
+  if (automaticPlayers[game.turn()]) return;
   const clickedPiece = game.get(coordinate);
   if (selectedSquare && coordinate === selectedSquare) {
     clearSelection();
@@ -1096,6 +1288,7 @@ function startDesignedGame() {
   const result = validateAndShowPosition();
   if (!result.candidate) return;
   game = result.candidate;
+  captureHistoryComplete = false;
   isDesignMode = false;
   designTool = { type: null, color: designTool.color };
   designEraseMode = false;
@@ -1143,6 +1336,7 @@ function clearGameForImportedPosition(candidate) {
   closePromotionSelector();
   cancelMoveAnimation(false);
   game = candidate;
+  captureHistoryComplete = false;
   resetClocks();
   clearSelection();
   lastMove = null;
@@ -1222,6 +1416,7 @@ function onPointerDown(event) {
     updateDesignToolPreview();
     return;
   }
+  if (automaticPlayers[game.turn()]) return;
   const piece = square ? game.get(square) : null;
   if (!piece || piece.color !== game.turn() || game.isGameOver()) return;
 
@@ -1317,6 +1512,7 @@ function resetGame() {
     return;
   }
   game.reset();
+  captureHistoryComplete = true;
   resetClocks();
   clearSelection();
   lastMove = null;
@@ -1334,6 +1530,7 @@ function rotateBoard() {
   boardFlipped = !boardFlipped;
   rotateBoardButtons.forEach((button) => button.setAttribute("aria-pressed", String(boardFlipped)));
   renderBoard();
+  maybeApplyDeferredAutomaticMove();
 }
 
 function toggleControlView(color) {
@@ -1391,7 +1588,7 @@ function renderAutomaticEvaluation() {
     scoreText = "0.0";
     statusText = "Tablas";
   } else if (evaluation.status === "error") {
-    statusText = "Stockfish no está disponible";
+    statusText = evaluation.errorMessage || "Stockfish no está disponible";
   } else if (evaluation.status === "design") {
     statusText = "El análisis se reanuda al iniciar la partida";
   }
@@ -1412,7 +1609,8 @@ function setAnalysisStatus(message) {
 
 function updateAnalysisControls() {
   analyzeButton.disabled = analysisState?.status === "loading" || analysisState?.status === "searching";
-  acceptAnalysisMoveButton.disabled = moveAnimationState !== null || analysisState?.status !== "ready";
+  const automaticTurn = !isDesignMode && automaticPlayers[game.turn()];
+  acceptAnalysisMoveButton.disabled = moveAnimationState !== null || automaticTurn || analysisState?.status !== "ready";
 }
 
 function clearAnalysisVariants() {
@@ -1464,6 +1662,7 @@ function handleStockfishFailure(message) {
   activeStockfishJob = null;
   pendingManualJob = null;
   pendingAutomaticJob = null;
+  deferredAutomaticMove = null;
   if (stockfishHandshake) {
     window.clearTimeout(stockfishHandshake.timer);
     const { reject } = stockfishHandshake;
@@ -1540,6 +1739,63 @@ function waitForStockfishReady() {
 function isAutomaticJobPositionCurrent(job) {
   return !isDesignMode && automaticEvaluation.requestId === job.id
     && game.fen({ forceEnpassantSquare: true }) === job.fen;
+}
+
+function isAutomaticPlayerJobCurrent(job) {
+  return isAutomaticJobPositionCurrent(job)
+    && automaticPlayers[job.sideToMove]
+    && game.turn() === job.sideToMove
+    && automaticPlayerGeneration[job.sideToMove] === job.playerGeneration
+    && !game.isGameOver();
+}
+
+function showAutomaticMoveError(message) {
+  automaticEvaluation = { ...automaticEvaluation, status: "error", errorMessage: message };
+  renderAutomaticEvaluation();
+}
+
+function maybeApplyDeferredAutomaticMove() {
+  const pending = deferredAutomaticMove;
+  if (!pending) return;
+  const { job, pv } = pending;
+  if (!isAutomaticPlayerJobCurrent(job)) {
+    deferredAutomaticMove = null;
+    return;
+  }
+  if (moveAnimationState || pendingManualJob || pendingAutomaticJob || stockfishPreparationInProgress
+    || stockfishSearchInProgress || activeStockfishJob || preparingStockfishJob
+    || ["loading", "searching"].includes(analysisState?.status)) return;
+  if (!pv) {
+    deferredAutomaticMove = null;
+    showAutomaticMoveError("Stockfish no devolvió una jugada principal.");
+    return;
+  }
+
+  let move;
+  try {
+    move = parseUciMove(pv.split(/\s+/)[0]);
+  } catch (error) {
+    deferredAutomaticMove = null;
+    showAutomaticMoveError(error.message || "Stockfish devolvió una jugada no reconocida.");
+    return;
+  }
+  const legalMove = game.moves({ verbose: true }).find((candidate) =>
+    candidate.from === move.from && candidate.to === move.to && (candidate.promotion ?? null) === (move.promotion ?? null));
+  if (!legalMove) {
+    deferredAutomaticMove = null;
+    showAutomaticMoveError("La jugada principal de Stockfish no es legal en la posición actual.");
+    return;
+  }
+
+  deferredAutomaticMove = null;
+  automaticMoveInProgress = true;
+  let moved = false;
+  try {
+    moved = makeMove(move.from, move.to, move.promotion ?? null);
+  } finally {
+    automaticMoveInProgress = false;
+  }
+  if (!moved) showAutomaticMoveError("No se pudo aplicar la jugada automática.");
 }
 
 function isStockfishJobCurrent(job) {
@@ -1626,12 +1882,16 @@ async function pumpStockfishQueue() {
     stockfishPreparationInProgress = false;
     preparingStockfishJob = null;
     updateAnalysisControls();
-    if (!stockfishSearchInProgress) void pumpStockfishQueue();
+    if (!stockfishSearchInProgress) {
+      void pumpStockfishQueue();
+      maybeApplyDeferredAutomaticMove();
+    }
   }
 }
 
 function scheduleAutomaticEvaluation() {
   if (isDesignMode) return;
+  deferredAutomaticMove = null;
   const fen = game.fen({ forceEnpassantSquare: true });
   const requestId = ++automaticEvaluationRequestId;
   pendingAutomaticJob = null;
@@ -1652,12 +1912,14 @@ function scheduleAutomaticEvaluation() {
 
   automaticEvaluation = { fen, requestId, status: "searching", scoreType: null, score: 0, sideToMove: game.turn(), depth: 0 };
   renderAutomaticEvaluation();
-  queueStockfishJob({ kind: "automatic", id: requestId, fen, sideToMove: game.turn() });
+  const sideToMove = game.turn();
+  queueStockfishJob({ kind: "automatic", id: requestId, fen, sideToMove, playerGeneration: automaticPlayerGeneration[sideToMove] });
 }
 
 function cancelAutomaticEvaluationForDesign() {
   automaticEvaluationRequestId += 1;
   pendingAutomaticJob = null;
+  deferredAutomaticMove = null;
   if (activeStockfishJob?.kind === "automatic") stopActiveStockfishSearch();
   automaticEvaluation = { fen: null, status: "design", scoreType: null, score: 0, depth: 0 };
   renderAutomaticEvaluation();
@@ -1673,7 +1935,15 @@ function parseStockfishInfo(line) {
   if (!depth || !score || !job) return;
   if (job.kind === "automatic") {
     if (!isAutomaticJobPositionCurrent(job) || depth < automaticEvaluation.depth) return;
-    automaticEvaluation = { ...automaticEvaluation, status: "searching", scoreType: score[1], score: Number(score[2]), sideToMove: job.sideToMove, depth };
+    automaticEvaluation = {
+      ...automaticEvaluation,
+      status: "searching",
+      scoreType: score[1],
+      score: Number(score[2]),
+      sideToMove: job.sideToMove,
+      depth,
+      ...(multipv === 1 && pv ? { principalVariation: pv[1].trim() } : {}),
+    };
     renderAutomaticEvaluation();
     return;
   }
@@ -1792,7 +2062,7 @@ function renderAnalysisVariants() {
     item.append(button);
     return item;
   }));
-  acceptAnalysisMoveButton.disabled = analysisState.status !== "ready";
+  updateAnalysisControls();
 }
 
 function finishStockfishSearch() {
@@ -1805,12 +2075,16 @@ function finishStockfishSearch() {
   activeStockfishJob = null;
   if (job?.kind === "automatic" && isAutomaticJobPositionCurrent(job)) {
     automaticEvaluation.status = automaticEvaluation.depth > 0 ? "ready" : "error";
+    if (isAutomaticPlayerJobCurrent(job)) {
+      deferredAutomaticMove = { job, pv: automaticEvaluation.principalVariation };
+    }
     renderAutomaticEvaluation();
   } else if (job?.kind === "manual") {
     finishManualStockfishSearch();
   }
   updateAnalysisControls();
   void pumpStockfishQueue();
+  maybeApplyDeferredAutomaticMove();
 }
 
 function finishManualStockfishSearch() {
@@ -1904,6 +2178,7 @@ function analyzeCurrentPosition() {
 
 function acceptSelectedAnalysisMove() {
   if (moveAnimationState) return;
+  if (!isDesignMode && automaticPlayers[game.turn()]) return;
   if (!analysisState || analysisState.status !== "ready") return;
   if (analysisState.inDesignMode !== isDesignMode || analysisState.snapshotFen !== currentPositionFen()) {
     markAnalysisStale();
@@ -2037,6 +2312,7 @@ window.addEventListener("resize", () => {
   cancelMoveAnimation();
   updateDesignToolPreview();
   updatePromotionSelectorPosition();
+  maybeApplyDeferredAutomaticMove();
 });
 window.addEventListener("scroll", () => {
   cancelMoveAnimation();
@@ -2049,3 +2325,4 @@ updateClockDisplay(true);
 await initializePieceStyles();
 renderBoard();
 scheduleAutomaticEvaluation();
+if (!isWelcomeDismissed()) openWelcomeModal();

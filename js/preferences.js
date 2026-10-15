@@ -5,6 +5,9 @@ export const PREFERENCES_STORAGE_KEY = "qchess.preferences";
 export const DEFAULT_PREFERENCES = Object.freeze({
   boardTheme: "classic",
   showClock: true,
+  showControlButtons: true,
+  whiteAutoPlay: false,
+  blackAutoPlay: false,
   pieceStyle: DEFAULT_PIECE_STYLE,
 });
 
@@ -20,8 +23,11 @@ function normalizePreferences(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return { ...DEFAULT_PREFERENCES };
   const boardTheme = Object.hasOwn(BOARD_THEMES, value.boardTheme) ? value.boardTheme : DEFAULT_PREFERENCES.boardTheme;
   const showClock = typeof value.showClock === "boolean" ? value.showClock : DEFAULT_PREFERENCES.showClock;
+  const showControlButtons = typeof value.showControlButtons === "boolean" ? value.showControlButtons : DEFAULT_PREFERENCES.showControlButtons;
+  const whiteAutoPlay = typeof value.whiteAutoPlay === "boolean" ? value.whiteAutoPlay : DEFAULT_PREFERENCES.whiteAutoPlay;
+  const blackAutoPlay = typeof value.blackAutoPlay === "boolean" ? value.blackAutoPlay : DEFAULT_PREFERENCES.blackAutoPlay;
   const pieceStyle = Object.hasOwn(PIECE_STYLES, value.pieceStyle) ? value.pieceStyle : DEFAULT_PREFERENCES.pieceStyle;
-  return { ...DEFAULT_PREFERENCES, ...value, boardTheme, showClock, pieceStyle };
+  return { ...DEFAULT_PREFERENCES, ...value, boardTheme, showClock, showControlButtons, whiteAutoPlay, blackAutoPlay, pieceStyle };
 }
 
 export function readPreferences() {
