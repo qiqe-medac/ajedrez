@@ -1,4 +1,144 @@
 import { Chess, validateFen } from "https://cdn.jsdelivr.net/npm/chess.js@1.4.0/dist/esm/chess.js";
+import { BOARD_THEMES, readPreferences, updatePreference } from "./preferences.js";
+import { DEFAULT_PIECE_STYLE, PIECE_STYLES, resolvePieceAsset, verifyPieceStyle } from "./piece-assets.js";
+
+const settingsButton = document.querySelector("#settings-button");
+const settingsBackdrop = document.querySelector("#settings-dialog");
+const settingsModal = settingsBackdrop.querySelector(".settings-modal");
+const settingsCloseButton = document.querySelector("#settings-close");
+const themeOptions = [...document.querySelectorAll(".board-theme-option")];
+const showClockSetting = document.querySelector("#show-clock-setting");
+const pieceStyleOptions = document.querySelector("#piece-style-options");
+const pieceStyleStatus = document.querySelector("#piece-style-status");
+let preferences = readPreferences();
+let activePieceStyle = preferences.pieceStyle;
+let pieceStyleRequestId = 0;
+
+function applyBoardTheme(themeName) {
+  const theme = BOARD_THEMES[themeName] || BOARD_THEMES.classic;
+  document.documentElement.style.setProperty("--board-light-square", theme.light);
+  document.documentElement.style.setProperty("--board-dark-square", theme.dark);
+  themeOptions.forEach((option) => option.setAttribute("aria-pressed", String(option.dataset.theme === themeName)));
+}
+
+function openSettings() {
+  settingsBackdrop.hidden = false;
+  document.body.classList.add("settings-open");
+  settingsCloseButton.focus();
+}
+
+function closeSettings() {
+  if (settingsBackdrop.hidden) return;
+  settingsBackdrop.hidden = true;
+  document.body.classList.remove("settings-open");
+  settingsButton.focus();
+}
+
+function applyClockVisibility(showClock) {
+  chessClocksElement.hidden = !showClock;
+  showClockSetting.checked = showClock;
+  if (showClock) updateClockDisplay(true);
+}
+
+function renderPieceStyleOptions(availableStyles = Object.keys(PIECE_STYLES)) {
+  pieceStyleOptions.replaceChildren(...availableStyles.map((style) => {
+    const option = document.createElement("button");
+    const preview = document.createElement("span");
+    const name = document.createElement("span");
+    option.className = "piece-style-option";
+    option.type = "button";
+    option.dataset.style = style;
+    option.setAttribute("aria-pressed", String(style === activePieceStyle));
+    option.setAttribute("aria-label", `Usar estilo de piezas ${PIECE_STYLES[style].label}`);
+    preview.className = "piece-style-preview";
+    preview.setAttribute("aria-hidden", "true");
+    PIECE_STYLES[style].preview.forEach((code) => {
+      const image = document.createElement("img");
+      image.src = resolvePieceAsset(style, code[0], code[1]);
+      image.alt = "";
+      preview.append(image);
+    });
+    name.className = "piece-style-name";
+    name.textContent = PIECE_STYLES[style].label;
+    option.append(preview, name);
+    option.addEventListener("click", () => selectPieceStyle(style));
+    return option;
+  }));
+}
+
+function refreshPieceImages() {
+  document.querySelectorAll("[data-piece-color][data-piece-type]").forEach((image) => {
+    image.src = resolvePieceAsset(activePieceStyle, image.dataset.pieceColor, image.dataset.pieceType);
+  });
+  document.querySelectorAll(".piece-style-option").forEach((option) => {
+    option.setAttribute("aria-pressed", String(option.dataset.style === activePieceStyle));
+  });
+  renderPiecePalette();
+  updateDesignToolPreview();
+}
+
+async function selectPieceStyle(style, persist = true) {
+  const requestId = ++pieceStyleRequestId;
+  pieceStyleStatus.textContent = "Comprobando las piezas…";
+  const available = await verifyPieceStyle(style);
+  if (requestId !== pieceStyleRequestId) return false;
+  if (!available) {
+    pieceStyleStatus.textContent = "No se pudo cargar el estilo completo; se mantiene el actual.";
+    return false;
+  }
+  activePieceStyle = style;
+  if (persist) preferences = updatePreference(preferences, "pieceStyle", style);
+  refreshPieceImages();
+  pieceStyleStatus.textContent = "Estilo aplicado.";
+  return true;
+}
+
+async function initializePieceStyles() {
+  const availableStyles = (await Promise.all(Object.keys(PIECE_STYLES).map(async (style) => [style, await verifyPieceStyle(style)])))
+    .filter(([, available]) => available)
+    .map(([style]) => style);
+  const fallbackStyle = availableStyles.includes(DEFAULT_PIECE_STYLE) ? DEFAULT_PIECE_STYLE : availableStyles[0];
+  const storedStyle = availableStyles.includes(preferences.pieceStyle) ? preferences.pieceStyle : fallbackStyle;
+  const restoredFallback = storedStyle !== preferences.pieceStyle;
+  activePieceStyle = storedStyle;
+  if (preferences.pieceStyle !== storedStyle) preferences = updatePreference(preferences, "pieceStyle", storedStyle);
+  renderPieceStyleOptions(availableStyles);
+  refreshPieceImages();
+  if (restoredFallback) pieceStyleStatus.textContent = "Se restauró el estilo predeterminado porque el guardado no está disponible.";
+}
+
+applyBoardTheme(preferences.boardTheme);
+settingsButton.addEventListener("click", openSettings);
+settingsCloseButton.addEventListener("click", closeSettings);
+settingsBackdrop.addEventListener("click", (event) => {
+  if (event.target === settingsBackdrop) closeSettings();
+});
+settingsModal.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeSettings();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [...settingsModal.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')];
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});
+themeOptions.forEach((option) => option.addEventListener("click", () => {
+  preferences = updatePreference(preferences, "boardTheme", option.dataset.theme);
+  applyBoardTheme(preferences.boardTheme);
+}));
+showClockSetting.addEventListener("change", () => {
+  preferences = updatePreference(preferences, "showClock", showClockSetting.checked);
+  applyClockVisibility(preferences.showClock);
+});
 
 const boardElement = document.querySelector("#chessboard");
 const boardFilesTop = document.querySelector(".board-files-top");
@@ -7,11 +147,12 @@ const boardRanksLeft = document.querySelector(".board-ranks-left");
 const boardRanksRight = document.querySelector(".board-ranks-right");
 const designTools = document.querySelector("#design-tools");
 const enterDesignButton = document.querySelector("#enter-design-button");
-const designColorSelect = document.querySelector("#design-color");
-const designTurnSelect = document.querySelector("#design-turn");
+const designTurnButton = document.querySelector("#design-turn-button");
 const validationLevelSelect = document.querySelector("#validation-level");
 const piecePalette = document.querySelector("#piece-palette");
 const erasePieceButton = document.querySelector("#erase-piece-button");
+const designToolPreview = document.querySelector("#design-tool-preview");
+const designToolPreviewImage = document.querySelector("#design-tool-preview-image");
 const clearBoardButton = document.querySelector("#clear-board-button");
 const initialPositionButton = document.querySelector("#initial-position-button");
 const validatePositionButton = document.querySelector("#validate-position-button");
@@ -26,7 +167,7 @@ const turnLabel = document.querySelector("#turn-label");
 const turnIndicator = document.querySelector(".turn-indicator");
 const panelNote = document.querySelector(".panel-note");
 const resetButton = document.querySelector("#reset-button");
-const rotateBoardButton = document.querySelector("#rotate-board-button");
+const rotateBoardButtons = [...document.querySelectorAll(".rotate-board-button")];
 const whiteControlButton = document.querySelector("#white-control-button");
 const blackControlButton = document.querySelector("#black-control-button");
 const analyzeButton = document.querySelector("#analyze-button");
@@ -36,8 +177,18 @@ const analysisVariants = document.querySelector("#analysis-variants");
 const acceptAnalysisMoveButton = document.querySelector("#accept-analysis-move");
 const cancelAnalysisButton = document.querySelector("#cancel-analysis");
 const chessClocksElement = document.querySelector("#chess-clocks");
+const evaluationBar = document.querySelector("#evaluation-bar");
+const evaluationWhite = document.querySelector("#evaluation-white");
+const evaluationBlack = document.querySelector("#evaluation-black");
+const evaluationScore = document.querySelector("#evaluation-score");
+const evaluationStatus = document.querySelector("#evaluation-status");
+const promotionOverlay = document.querySelector("#promotion-overlay");
+const promotionDialog = promotionOverlay.querySelector(".promotion-dialog");
+const promotionOptionButtons = [...promotionOverlay.querySelectorAll("[data-promotion]")];
+const cancelPromotionButton = document.querySelector("#cancel-promotion");
+const cancelPromotionTextButton = document.querySelector("#cancel-promotion-text");
 const files = "abcdefgh";
-const pieceNames = { k: "rey", q: "dama", r: "torre", b: "alfil", n: "caballo", p: "peón" };
+const pieceNames = { k: "rey", q: "dama", r: "torre", b: "alfil", n: "caballo", p: "pe\u00f3n" };
 const pieceColors = { w: "white", b: "black" };
 const clockViews = {
   w: {
@@ -56,15 +207,21 @@ let game = new Chess();
 let selectedSquare = null;
 let legalMoves = [];
 let lastMove = null;
+let pendingPromotion = null;
 let dragState = null;
 let suppressClick = false;
 let boardFlipped = false;
 let controlViewColor = null;
 let controlMap = null;
+let moveAnimationState = null;
 let isDesignMode = false;
 let designPosition = null;
 let designTurn = "w";
 let designTool = { type: "q", color: "w" };
+let designEraseMode = false;
+let designToolPointer = null;
+let designToolPreviewFrame = null;
+let designToolPreviewSize = 40;
 let pendingDesignLoad = null;
 const designPieceTypes = ["k", "q", "r", "b", "n", "p"];
 const STOCKFISH_SEARCH_DEPTH = 12;
@@ -85,6 +242,15 @@ let stockfishReadyWaiter = null;
 let stockfishSearchInProgress = false;
 let stockfishSearchTimer = null;
 let analysisState = null;
+let activeStockfishJob = null;
+let preparingStockfishJob = null;
+let stockfishPreparationInProgress = false;
+let pendingManualJob = null;
+let pendingAutomaticJob = null;
+let automaticEvaluationRequestId = 0;
+let automaticEvaluation = { fen: null, status: "idle", scoreType: null, score: 0, depth: 0 };
+
+applyClockVisibility(preferences.showClock);
 
 function toSquareName(row, column) {
   return `${files[column]}${8 - row}`;
@@ -247,25 +413,106 @@ function clonePosition(position) {
 }
 
 function renderPiecePalette() {
-  piecePalette.replaceChildren(...designPieceTypes.map((type) => {
-    const button = document.createElement("button");
-    const image = document.createElement("img");
-    const label = document.createElement("span");
-    button.className = "palette-piece";
-    button.type = "button";
-    button.setAttribute("aria-pressed", String(designTool.type === type));
-    button.setAttribute("aria-label", `Seleccionar ${pieceNames[type]} ${designColorSelect.value === "w" ? "blanco" : "negro"}`);
-    image.src = `pieces/${pieceColors[designColorSelect.value]}-${{ k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" }[type]}.svg`;
-    image.alt = "";
-    label.textContent = pieceNames[type];
-    button.append(image, label);
-    button.addEventListener("click", () => {
-      designTool = { type, color: designColorSelect.value };
-      erasePieceButton.setAttribute("aria-pressed", "false");
-      renderPiecePalette();
+  ["w", "b"].forEach((color) => {
+    const row = piecePalette.querySelector(`.piece-option-row[data-color="${color}"]`);
+    row.replaceChildren(...designPieceTypes.map((type) => {
+      const button = document.createElement("button");
+      const image = document.createElement("img");
+      const label = document.createElement("span");
+      button.className = "palette-piece";
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(designTool.type === type && designTool.color === color && !designEraseMode));
+      button.setAttribute("aria-label", `Seleccionar ${pieceNames[type]} ${color === "w" ? "blanco" : "negro"}`);
+      image.dataset.pieceColor = color;
+      image.dataset.pieceType = type;
+      image.src = resolvePieceAsset(activePieceStyle, color, type);
+      image.alt = "";
+      label.textContent = pieceNames[type];
+      button.append(image, label);
+      button.addEventListener("click", () => {
+        designTool = { type, color };
+        designEraseMode = false;
+        erasePieceButton.setAttribute("aria-pressed", "false");
+        renderPiecePalette();
+        updateDesignToolPreview();
+      });
+      return button;
+    }));
+  });
+}
+
+function renderDesignTurnButton() {
+  const side = designTurn === "w" ? "blancas" : "negras";
+  designTurnButton.textContent = `Juegan ${side}`;
+  designTurnButton.setAttribute("aria-pressed", String(designTurn === "b"));
+  designTurnButton.setAttribute("aria-label", `Cambiar turno. Actualmente juegan ${side}`);
+}
+
+function toggleDesignTurn() {
+  designTurn = designTurn === "w" ? "b" : "w";
+  renderDesignTurnButton();
+  hideDesignMessage();
+  renderBoard();
+}
+
+function positionDesignToolPreview() {
+  if (!designToolPointer || designToolPreview.hidden) return;
+  const offset = designToolPreviewSize / 2;
+  designToolPreview.style.transform = `translate3d(${designToolPointer.x - offset}px, ${designToolPointer.y - offset}px, 0)`;
+}
+
+function updateDesignToolPreview() {
+  const isEraser = isDesignMode && designEraseMode;
+  const hasTool = isDesignMode && (designTool.type !== null || designEraseMode);
+  document.body.classList.toggle("design-placement-active", hasTool && !isEraser);
+  document.body.classList.toggle("design-erase-active", isEraser);
+  designToolPreview.classList.toggle("is-eraser", isEraser);
+  designToolPreview.hidden = !hasTool || Boolean(dragState?.design) || !designToolPointer;
+
+  if (!hasTool) return;
+  if (!isEraser) {
+    designToolPreviewImage.dataset.pieceColor = designTool.color;
+    designToolPreviewImage.dataset.pieceType = designTool.type;
+    designToolPreviewImage.src = resolvePieceAsset(activePieceStyle, designTool.color, designTool.type);
+  }
+
+  const square = boardElement.querySelector(".square");
+  designToolPreviewSize = square ? square.getBoundingClientRect().width * 0.68 : 40;
+  designToolPreview.style.setProperty("--design-tool-size", `${designToolPreviewSize}px`);
+  if (designToolPreviewFrame !== null) cancelAnimationFrame(designToolPreviewFrame);
+  designToolPreviewFrame = requestAnimationFrame(() => {
+    designToolPreviewFrame = null;
+    positionDesignToolPreview();
+  });
+}
+
+function trackDesignToolPointer(event) {
+  if (!isDesignMode || (designTool.type === null && !designEraseMode)) return;
+  designToolPointer = { x: event.clientX, y: event.clientY };
+  if (designToolPreview.hidden && !dragState?.design) {
+    updateDesignToolPreview();
+  } else if (designToolPreviewFrame === null) {
+    designToolPreviewFrame = requestAnimationFrame(() => {
+      designToolPreviewFrame = null;
+      positionDesignToolPreview();
     });
-    return button;
-  }));
+  }
+}
+
+function cancelDesignTool() {
+  if (!isDesignMode || (designTool.type === null && !designEraseMode)) return;
+  designTool = { type: null, color: designTool.color };
+  designEraseMode = false;
+  erasePieceButton.setAttribute("aria-pressed", "false");
+  piecePalette.querySelectorAll(".palette-piece").forEach((button) => button.setAttribute("aria-pressed", "false"));
+  updateDesignToolPreview();
+}
+
+function handleDesignToolKeydown(event) {
+  if (event.key !== "Escape" || !settingsBackdrop.hidden || !isDesignMode
+    || (designTool.type === null && !designEraseMode)) return;
+  event.preventDefault();
+  cancelDesignTool();
 }
 
 function showDesignMessage(title, errors = [], warnings = [], success = false, offerDesignLoad = false) {
@@ -314,13 +561,93 @@ function renderPiece(piece, square, coordinate) {
 
   const image = document.createElement("img");
   const color = pieceColors[piece.color];
-  const type = { k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" }[piece.type];
   image.className = "piece-image";
-  image.src = `pieces/${color}-${type}.svg`;
+  image.dataset.pieceColor = piece.color;
+  image.dataset.pieceType = piece.type;
+  image.src = resolvePieceAsset(activePieceStyle, piece.color, piece.type);
   image.alt = `${pieceNames[piece.type]} ${color === "white" ? "blanco" : "negro"}`;
   image.draggable = false;
   image.dataset.square = coordinate;
   square.append(image);
+}
+
+function createMoveAnimationSprite(from, to) {
+  const sourceImage = boardElement.querySelector(`[data-square="${from}"] .piece-image`);
+  const destinationSquare = boardElement.querySelector(`[data-square="${to}"]`);
+  if (!sourceImage || !destinationSquare) return null;
+
+  const sourceRect = sourceImage.getBoundingClientRect();
+  const destinationRect = destinationSquare.getBoundingClientRect();
+  const sprite = sourceImage.cloneNode(false);
+  sprite.className = "move-animation-piece";
+  sprite.alt = "";
+  sprite.setAttribute("aria-hidden", "true");
+  sprite.draggable = false;
+  sprite.style.left = `${sourceRect.left}px`;
+  sprite.style.top = `${sourceRect.top}px`;
+  sprite.style.width = `${sourceRect.width}px`;
+  sprite.style.height = `${sourceRect.height}px`;
+
+  return {
+    element: sprite,
+    fromX: sourceRect.left + sourceRect.width / 2,
+    fromY: sourceRect.top + sourceRect.height / 2,
+    toX: destinationRect.left + destinationRect.width / 2,
+    toY: destinationRect.top + destinationRect.height / 2,
+    destination: to,
+  };
+}
+
+function createMoveAnimationSprites(move, from, to) {
+  const motions = [{ from, to }];
+  if (move.flags?.includes("k") || move.flags?.includes("q")) {
+    const rank = from[1];
+    const kingSide = move.flags.includes("k");
+    motions.push({ from: `${kingSide ? "h" : "a"}${rank}`, to: `${kingSide ? "f" : "d"}${rank}` });
+  }
+  return motions.map((motion) => createMoveAnimationSprite(motion.from, motion.to)).filter(Boolean);
+}
+
+function finishMoveAnimation(state) {
+  if (moveAnimationState !== state) return;
+  state.sprites.forEach(({ element }) => element.remove());
+  moveAnimationState = null;
+  document.body.classList.remove("move-animation-active");
+  updateAnalysisControls();
+  renderBoard();
+}
+
+function cancelMoveAnimation(render = true) {
+  const state = moveAnimationState;
+  if (!state) return;
+  moveAnimationState = null;
+  if (state.frame !== null) cancelAnimationFrame(state.frame);
+  state.animations.forEach((animation) => animation.cancel());
+  state.sprites.forEach(({ element }) => element.remove());
+  document.body.classList.remove("move-animation-active");
+  updateAnalysisControls();
+  if (render) renderBoard();
+}
+
+function startMoveAnimation(sprites) {
+  if (!sprites.length || typeof Element.prototype.animate !== "function") return false;
+  const state = { sprites, destinations: new Set(sprites.map(({ destination }) => destination)), animations: [], frame: null };
+  moveAnimationState = state;
+  document.body.classList.add("move-animation-active");
+  sprites.forEach(({ element }) => document.body.append(element));
+  updateAnalysisControls();
+  state.frame = requestAnimationFrame(() => {
+    state.frame = null;
+    if (moveAnimationState !== state) return;
+    const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 80 : 300;
+    state.animations = sprites.map(({ element, fromX, fromY, toX, toY }) => element.animate([
+      { transform: "translate3d(0, 0, 0)" },
+      { transform: `translate3d(${toX - fromX}px, ${toY - fromY}px, 0)` },
+    ], { duration, easing: "ease-in-out", fill: "forwards" }));
+    Promise.all(state.animations.map((animation) => animation.finished.catch(() => null)))
+      .then(() => finishMoveAnimation(state));
+  });
+  return true;
 }
 
 function renderBoard() {
@@ -332,6 +659,7 @@ function renderBoard() {
   const legalDestinations = new Map((isDesignMode ? [] : legalMoves).map((move) => [move.to, move]));
   boardElement.classList.toggle("flipped", boardFlipped);
   chessClocksElement.classList.toggle("flipped", boardFlipped);
+  renderAutomaticEvaluation();
   renderCoordinates();
   boardElement.replaceChildren();
 
@@ -342,6 +670,7 @@ function renderBoard() {
       const controlCount = controlMap?.[row][column] ?? 0;
       const square = document.createElement("div");
       const classes = ["square", (row + column) % 2 === 0 ? "light" : "dark"];
+      if (moveAnimationState?.destinations.has(coordinate)) classes.push("move-animation-destination");
       if (controlCount > 0) classes.push(`control-level-${Math.min(controlCount, 4)}`);
       if (coordinate === selectedSquare) classes.push("selected");
       if (!isDesignMode && (coordinate === lastMove?.from || coordinate === lastMove?.to)) classes.push("last-move");
@@ -380,6 +709,7 @@ function renderBoard() {
   whiteControlButton.classList.toggle("is-active", controlViewColor === "w");
   blackControlButton.classList.toggle("is-active", controlViewColor === "b");
   panelNote.textContent = isDesignMode ? "Modo Diseño activo. Selecciona una pieza y una casilla para editar la posición." : getGameMessage();
+  updatePromotionSelectorPosition();
 }
 
 function turnCardDesignState(active) {
@@ -432,21 +762,77 @@ function selectPiece(square) {
   renderBoard();
 }
 
-function makeMove(from, to, promotion = "q") {
+function updatePromotionSelectorPosition() {
+  if (!pendingPromotion || promotionOverlay.hidden) return;
+  const destinationSquare = boardElement.querySelector(`[data-square="${pendingPromotion.to}"]`);
+  if (!destinationSquare) return;
+  const squareRect = destinationSquare.getBoundingClientRect();
+  const dialogRect = promotionDialog.getBoundingClientRect();
+  const left = Math.max(8, Math.min(window.innerWidth - dialogRect.width - 8,
+    squareRect.left + squareRect.width / 2 - dialogRect.width / 2));
+  const top = Math.max(8, Math.min(window.innerHeight - dialogRect.height - 8,
+    squareRect.top + squareRect.height / 2 - dialogRect.height / 2));
+  promotionDialog.style.left = `${left}px`;
+  promotionDialog.style.top = `${top}px`;
+}
+
+function closePromotionSelector(restoreFocus = false) {
+  pendingPromotion = null;
+  promotionOverlay.hidden = true;
+  if (restoreFocus) {
+    boardElement.tabIndex = -1;
+    boardElement.focus();
+  }
+}
+
+function openPromotionSelector(from, to, promotionMoves) {
+  const options = new Set(promotionMoves.map((move) => move.promotion));
+  if (!["q", "r", "b", "n"].every((piece) => options.has(piece))) return false;
+  pendingPromotion = { from, to, color: game.turn() };
+  promotionOptionButtons.forEach((button) => {
+    const image = button.querySelector("img");
+    const piece = button.dataset.promotion;
+    image.dataset.pieceColor = pendingPromotion.color;
+    image.dataset.pieceType = piece;
+    image.src = resolvePieceAsset(activePieceStyle, pendingPromotion.color, piece);
+    image.alt = `${pieceNames[piece]} ${pieceColors[pendingPromotion.color] === "white" ? "blanca" : "negra"}`;
+  });
+  promotionOverlay.hidden = false;
+  updatePromotionSelectorPosition();
+  promotionOptionButtons[0].focus();
+  return true;
+}
+
+function makeMove(from, to, promotion = null) {
+  if (isDesignMode || moveAnimationState || pendingPromotion) return false;
+  const destinationMoves = game.moves({ square: from, verbose: true }).filter((move) => move.to === to);
+  if (!destinationMoves.length) return false;
+  if (destinationMoves.some((move) => move.promotion) && promotion === null) {
+    return openPromotionSelector(from, to, destinationMoves.filter((move) => move.promotion));
+  }
+  const legalMove = destinationMoves.find((move) => (move.promotion ?? null) === promotion);
+  if (!legalMove) return false;
+  const sprites = createMoveAnimationSprites(legalMove, from, to);
+
   try {
     const moverColor = game.turn();
-    const move = game.move({ from, to, promotion });
+    const move = game.move({ from, to, ...(promotion ? { promotion } : {}) });
+    if (!move) return false;
     switchClock(moverColor, game.turn());
     lastMove = { from: move.from, to: move.to };
     clearSelection();
+    startMoveAnimation(sprites);
     renderBoard();
+    scheduleAutomaticEvaluation();
     return true;
   } catch {
+    sprites.forEach(({ element }) => element.remove());
     return false;
   }
 }
 
 function handleSquareClick(coordinate) {
+  if (moveAnimationState) return;
   if (isDesignMode) {
     handleDesignSquareClick(coordinate);
     return;
@@ -472,16 +858,47 @@ function handleSquareClick(coordinate) {
 function handleDesignSquareClick(coordinate) {
   const file = files.indexOf(coordinate[0]);
   const row = 8 - Number(coordinate[1]);
-  if (designTool.type === null) {
+  if (designEraseMode) {
+    if (!designPosition[row][file]) return;
     designPosition[row][file] = null;
+  } else if (designTool.type !== null) {
+    const changed = placeDesignPiece(coordinate, designTool);
+    if (!changed) return;
   } else {
-    designPosition[row][file] = { type: designTool.type, color: designColorSelect.value };
+    return;
   }
   hideDesignMessage();
   renderBoard();
+  updateDesignToolPreview();
+}
+
+function placeDesignPiece(coordinate, piece) {
+  const row = 8 - Number(coordinate[1]);
+  const column = files.indexOf(coordinate[0]);
+  let changed = false;
+
+  if (piece.type === "k") {
+    for (let boardRow = 0; boardRow < 8; boardRow += 1) {
+      for (let boardColumn = 0; boardColumn < 8; boardColumn += 1) {
+        const existing = designPosition[boardRow][boardColumn];
+        if (existing?.type === "k" && existing.color === piece.color
+          && (boardRow !== row || boardColumn !== column)) {
+          designPosition[boardRow][boardColumn] = null;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  const current = designPosition[row][column];
+  if (current?.type === piece.type && current.color === piece.color) return changed;
+  designPosition[row][column] = { type: piece.type, color: piece.color };
+  return true;
 }
 
 function enterDesignMode() {
+  closePromotionSelector();
+  cancelMoveAnimation(false);
   if (chessClock.state === "running" && chessClock.activeColor) stopClock(chessClock.activeColor);
   chessClock.state = "ready";
   chessClock.activeColor = null;
@@ -492,16 +909,19 @@ function enterDesignMode() {
   clearSelection();
   designPosition = clonePosition(game.board());
   designTurn = game.turn();
-  designTurnSelect.value = designTurn;
-  designTool = { type: "q", color: designColorSelect.value };
+  renderDesignTurnButton();
+  designTool = { type: null, color: "w" };
+  designEraseMode = false;
   erasePieceButton.setAttribute("aria-pressed", "false");
   isDesignMode = true;
+  cancelAutomaticEvaluationForDesign();
   designTools.hidden = false;
   enterDesignButton.hidden = true;
   document.body.classList.add("design-mode");
   hideDesignMessage();
   renderPiecePalette();
   renderBoard();
+  updateDesignToolPreview();
 }
 
 function positionToFen(position, turn) {
@@ -677,6 +1097,10 @@ function startDesignedGame() {
   if (!result.candidate) return;
   game = result.candidate;
   isDesignMode = false;
+  designTool = { type: null, color: designTool.color };
+  designEraseMode = false;
+  erasePieceButton.setAttribute("aria-pressed", "false");
+  piecePalette.querySelectorAll(".palette-piece").forEach((button) => button.setAttribute("aria-pressed", "false"));
   designPosition = null;
   designTools.hidden = true;
   enterDesignButton.hidden = false;
@@ -688,6 +1112,8 @@ function startDesignedGame() {
   dragState = null;
   suppressClick = false;
   renderBoard();
+  updateDesignToolPreview();
+  scheduleAutomaticEvaluation();
 }
 
 function saveCurrentPosition() {
@@ -714,6 +1140,8 @@ function saveCurrentPosition() {
 }
 
 function clearGameForImportedPosition(candidate) {
+  closePromotionSelector();
+  cancelMoveAnimation(false);
   game = candidate;
   resetClocks();
   clearSelection();
@@ -722,6 +1150,7 @@ function clearGameForImportedPosition(candidate) {
   dragState = null;
   suppressClick = false;
   renderBoard();
+  scheduleAutomaticEvaluation();
 }
 
 function loadFenFile(file) {
@@ -731,7 +1160,7 @@ function loadFenFile(file) {
     if (isDesignMode) {
       designPosition = clonePosition(parsed.position);
       designTurn = parsed.turn;
-      designTurnSelect.value = parsed.turn;
+      renderDesignTurnButton();
       hideDesignMessage();
       renderBoard();
       const warnings = parsed.validation.ok ? [] : [parsed.validation.error];
@@ -757,7 +1186,7 @@ function loadPendingPositionIntoDesign() {
   if (!isDesignMode) enterDesignMode();
   designPosition = clonePosition(pending.position);
   designTurn = pending.turn;
-  designTurnSelect.value = pending.turn;
+  renderDesignTurnButton();
   renderBoard();
   showDesignMessage("La posición FEN se ha cargado en Modo Diseño para que puedas corregirla.");
 }
@@ -773,6 +1202,7 @@ function createDragGhost(image, pointerEvent) {
 }
 
 function onPointerDown(event) {
+  if (moveAnimationState && !isDesignMode) return;
   const squareElement = event.target.closest(".square");
   const image = squareElement?.querySelector(".piece-image");
   const square = squareElement?.dataset.square;
@@ -789,6 +1219,7 @@ function onPointerDown(event) {
       design: true,
     };
     boardElement.setPointerCapture(event.pointerId);
+    updateDesignToolPreview();
     return;
   }
   const piece = square ? game.get(square) : null;
@@ -838,13 +1269,15 @@ function onPointerUp(event) {
     if (destination && destination !== drag.from) {
       const fromRow = 8 - Number(drag.from[1]);
       const fromColumn = files.indexOf(drag.from[0]);
-      const toRow = 8 - Number(destination[1]);
-      const toColumn = files.indexOf(destination[0]);
-      designPosition[toRow][toColumn] = designPosition[fromRow][fromColumn];
+      const draggedPiece = designPosition[fromRow][fromColumn];
       designPosition[fromRow][fromColumn] = null;
-      hideDesignMessage();
+      if (draggedPiece) {
+        placeDesignPiece(destination, draggedPiece);
+        hideDesignMessage();
+      }
     }
     renderBoard();
+    updateDesignToolPreview();
     return;
   }
   if (!drag.moved) {
@@ -869,13 +1302,16 @@ function onPointerCancel(event) {
   dragState.ghost?.remove();
   dragState = null;
   renderBoard();
+  updateDesignToolPreview();
 }
 
 function resetGame() {
+  closePromotionSelector();
+  cancelMoveAnimation(false);
   if (isDesignMode) {
     designPosition = clonePosition(new Chess().board());
     designTurn = "w";
-    designTurnSelect.value = "w";
+    renderDesignTurnButton();
     hideDesignMessage();
     renderBoard();
     return;
@@ -890,11 +1326,13 @@ function resetGame() {
   controlViewColor = null;
   controlMap = null;
   renderBoard();
+  scheduleAutomaticEvaluation();
 }
 
 function rotateBoard() {
+  cancelMoveAnimation(false);
   boardFlipped = !boardFlipped;
-  rotateBoardButton.setAttribute("aria-pressed", String(boardFlipped));
+  rotateBoardButtons.forEach((button) => button.setAttribute("aria-pressed", String(boardFlipped)));
   renderBoard();
 }
 
@@ -909,14 +1347,72 @@ function currentPositionFen() {
     : game.fen({ forceEnpassantSquare: true });
 }
 
+function getWhiteCentipawnScore(evaluation) {
+  if (typeof evaluation.whiteScore === "number") return evaluation.whiteScore;
+  return evaluation.sideToMove === "w" ? evaluation.score : -evaluation.score;
+}
+
+function renderAutomaticEvaluation() {
+  const evaluation = automaticEvaluation;
+  evaluationBar.classList.toggle("flipped", boardFlipped);
+
+  let whiteShare = 50;
+  let scoreText = "—";
+  let statusText = "Esperando análisis";
+  if (evaluation.status === "searching") {
+    statusText = evaluation.depth > 0 ? `Analizando · profundidad ${evaluation.depth}` : "Analizando posición…";
+    if (evaluation.scoreType) {
+      const whiteScore = getWhiteCentipawnScore(evaluation);
+      if (evaluation.scoreType === "mate") {
+        whiteShare = whiteScore > 0 ? 98 : whiteScore < 0 ? 2 : 50;
+        scoreText = `${whiteScore > 0 ? "+" : whiteScore < 0 ? "−" : ""}M${Math.abs(evaluation.score)}`;
+      } else {
+        whiteShare = 50 + 48 * Math.tanh(whiteScore / 600);
+        scoreText = `${whiteScore > 0 ? "+" : whiteScore < 0 ? "−" : ""}${(whiteScore / 100).toFixed(1)}`;
+      }
+    } else {
+      scoreText = "…";
+    }
+  } else if (evaluation.status === "ready") {
+    const whiteScore = getWhiteCentipawnScore(evaluation);
+    if (evaluation.scoreType === "mate") {
+      whiteShare = whiteScore > 0 ? 98 : whiteScore < 0 ? 2 : 50;
+      scoreText = `${whiteScore > 0 ? "+" : whiteScore < 0 ? "−" : ""}M${Math.abs(evaluation.score)}`;
+    } else {
+      whiteShare = 50 + 48 * Math.tanh(whiteScore / 600);
+      scoreText = `${whiteScore > 0 ? "+" : whiteScore < 0 ? "−" : ""}${(whiteScore / 100).toFixed(1)}`;
+    }
+    statusText = `Análisis completado · profundidad ${evaluation.depth}`;
+  } else if (evaluation.status === "checkmate") {
+    whiteShare = evaluation.whiteScore > 0 ? 98 : 2;
+    scoreText = `${evaluation.whiteScore > 0 ? "+" : "−"}M0`;
+    statusText = `Jaque mate · ganan las ${evaluation.whiteScore > 0 ? "blancas" : "negras"}`;
+  } else if (evaluation.status === "draw") {
+    scoreText = "0.0";
+    statusText = "Tablas";
+  } else if (evaluation.status === "error") {
+    statusText = "Stockfish no está disponible";
+  } else if (evaluation.status === "design") {
+    statusText = "El análisis se reanuda al iniciar la partida";
+  }
+
+  whiteShare = Math.max(2, Math.min(98, whiteShare));
+  evaluationWhite.style.height = `${whiteShare}%`;
+  evaluationBlack.style.height = `${100 - whiteShare}%`;
+  evaluationScore.textContent = scoreText;
+  evaluationStatus.textContent = statusText;
+  const topAdvantage = boardFlipped ? "negras" : "blancas";
+  const bottomAdvantage = boardFlipped ? "blancas" : "negras";
+  evaluationBar.setAttribute("aria-label", `Evaluación: ${scoreText}. ${statusText}. La barra muestra la ventaja de las ${topAdvantage} arriba y de las ${bottomAdvantage} abajo.`);
+}
+
 function setAnalysisStatus(message) {
   analysisStatus.textContent = message;
 }
 
 function updateAnalysisControls() {
-  analyzeButton.disabled = stockfishSearchInProgress || Boolean(stockfishHandshake) || Boolean(stockfishReadyWaiter)
-    || analysisState?.status === "loading" || analysisState?.status === "searching";
-  acceptAnalysisMoveButton.disabled = analysisState?.status !== "ready";
+  analyzeButton.disabled = analysisState?.status === "loading" || analysisState?.status === "searching";
+  acceptAnalysisMoveButton.disabled = moveAnimationState !== null || analysisState?.status !== "ready";
 }
 
 function clearAnalysisVariants() {
@@ -925,13 +1421,8 @@ function clearAnalysisVariants() {
 }
 
 function closeAnalysisPanel() {
-  if (stockfishSearchInProgress && stockfishWorker) {
-    try {
-      stockfishWorker.postMessage("stop");
-    } catch {
-      handleStockfishFailure("No se pudo detener el análisis.");
-    }
-  }
+  pendingManualJob = null;
+  if (activeStockfishJob?.kind === "manual") stopActiveStockfishSearch();
   analysisState = null;
   analysisPanel.hidden = true;
   clearAnalysisVariants();
@@ -941,18 +1432,14 @@ function closeAnalysisPanel() {
 
 function markAnalysisStale() {
   if (!analysisState || analysisState.status === "stale") return;
+  const staleState = analysisState;
   analysisState.status = "stale";
   analysisState.variants = [];
   analysisState.selectedMove = null;
   clearAnalysisVariants();
   setAnalysisStatus("La posición cambió. Vuelve a analizar antes de aceptar una jugada.");
-  if (stockfishSearchInProgress && stockfishWorker) {
-    try {
-      stockfishWorker.postMessage("stop");
-    } catch {
-      handleStockfishFailure("No se pudo detener el análisis obsoleto.");
-    }
-  }
+  if (pendingManualJob?.state === staleState) pendingManualJob = null;
+  if (activeStockfishJob?.kind === "manual" && activeStockfishJob.state === staleState) stopActiveStockfishSearch();
   updateAnalysisControls();
 }
 
@@ -970,9 +1457,13 @@ function handleStockfishFailure(message) {
   }
   const error = new Error(message);
   const worker = stockfishWorker;
+  const failedJob = activeStockfishJob || preparingStockfishJob;
   stockfishWorker = null;
   stockfishReadyPromise = null;
   stockfishSearchInProgress = false;
+  activeStockfishJob = null;
+  pendingManualJob = null;
+  pendingAutomaticJob = null;
   if (stockfishHandshake) {
     window.clearTimeout(stockfishHandshake.timer);
     const { reject } = stockfishHandshake;
@@ -992,6 +1483,10 @@ function handleStockfishFailure(message) {
     analysisState.selectedMove = null;
     clearAnalysisVariants();
     setAnalysisStatus(`No se pudo usar Stockfish: ${message}`);
+  }
+  if (failedJob?.kind === "automatic" || automaticEvaluation.status === "searching") {
+    automaticEvaluation.status = "error";
+    renderAutomaticEvaluation();
   }
   updateAnalysisControls();
   renderBoard();
@@ -1042,16 +1537,150 @@ function waitForStockfishReady() {
   });
 }
 
+function isAutomaticJobPositionCurrent(job) {
+  return !isDesignMode && automaticEvaluation.requestId === job.id
+    && game.fen({ forceEnpassantSquare: true }) === job.fen;
+}
+
+function isStockfishJobCurrent(job) {
+  if (job.kind === "automatic") return isAutomaticJobPositionCurrent(job) && !pendingManualJob;
+  return analysisState === job.state && ["loading", "searching"].includes(job.state.status)
+    && job.state.inDesignMode === isDesignMode && currentPositionFen() === job.fen;
+}
+
+function stopActiveStockfishSearch() {
+  if (!stockfishSearchInProgress || !stockfishWorker) return;
+  try {
+    stockfishWorker.postMessage("stop");
+  } catch {
+    handleStockfishFailure("No se pudo detener el análisis anterior.");
+  }
+}
+
+function queueStockfishJob(job) {
+  if (job.kind === "manual") {
+    if (preparingStockfishJob?.kind === "automatic" && isAutomaticJobPositionCurrent(preparingStockfishJob)) {
+      pendingAutomaticJob = preparingStockfishJob;
+    }
+    pendingManualJob = job;
+    if (activeStockfishJob?.kind === "automatic" && isAutomaticJobPositionCurrent(activeStockfishJob)) {
+      pendingAutomaticJob = pendingAutomaticJob || activeStockfishJob;
+      stopActiveStockfishSearch();
+    }
+  } else {
+    pendingAutomaticJob = job;
+    if (activeStockfishJob && activeStockfishJob.fen !== job.fen) stopActiveStockfishSearch();
+  }
+  void pumpStockfishQueue();
+}
+
+async function pumpStockfishQueue() {
+  if (stockfishPreparationInProgress || stockfishSearchInProgress) return;
+  const job = pendingManualJob || pendingAutomaticJob;
+  if (!job) return;
+  if (job.kind === "manual") pendingManualJob = null;
+  else pendingAutomaticJob = null;
+  if (!isStockfishJobCurrent(job)) {
+    void pumpStockfishQueue();
+    return;
+  }
+
+  stockfishPreparationInProgress = true;
+  preparingStockfishJob = job;
+  updateAnalysisControls();
+  try {
+    await ensureStockfishReady();
+    if (!isStockfishJobCurrent(job)) return;
+    stockfishWorker.postMessage(`setoption name MultiPV value ${job.kind === "manual" ? job.state.expectedLines : 1}`);
+    await waitForStockfishReady();
+    if (!isStockfishJobCurrent(job)) return;
+
+    activeStockfishJob = job;
+    stockfishSearchInProgress = true;
+    if (job.kind === "manual") {
+      job.state.status = "searching";
+      setAnalysisStatus("Analizando posición…");
+    } else {
+      automaticEvaluation.status = "searching";
+      renderAutomaticEvaluation();
+    }
+    updateAnalysisControls();
+    stockfishWorker.postMessage(`position fen ${job.fen}`);
+    stockfishWorker.postMessage(`go depth ${job.kind === "manual" ? STOCKFISH_SEARCH_DEPTH : 10}`);
+    stockfishSearchTimer = window.setTimeout(
+      () => handleStockfishFailure("El motor superó el tiempo máximo de análisis."),
+      job.kind === "manual" ? STOCKFISH_SEARCH_TIMEOUT : 25000,
+    );
+  } catch (error) {
+    if (isStockfishJobCurrent(job)) {
+      if (job.kind === "manual") {
+        job.state.status = "error";
+        setAnalysisStatus(error.message || "No se pudo analizar esta posición.");
+        clearAnalysisVariants();
+      } else {
+        automaticEvaluation.status = "error";
+        renderAutomaticEvaluation();
+      }
+    }
+  } finally {
+    stockfishPreparationInProgress = false;
+    preparingStockfishJob = null;
+    updateAnalysisControls();
+    if (!stockfishSearchInProgress) void pumpStockfishQueue();
+  }
+}
+
+function scheduleAutomaticEvaluation() {
+  if (isDesignMode) return;
+  const fen = game.fen({ forceEnpassantSquare: true });
+  const requestId = ++automaticEvaluationRequestId;
+  pendingAutomaticJob = null;
+
+  if (game.isCheckmate()) {
+    const whiteWon = game.turn() === "b";
+    automaticEvaluation = { fen, requestId, status: "checkmate", whiteScore: whiteWon ? 1 : -1 };
+    if (activeStockfishJob) stopActiveStockfishSearch();
+    renderAutomaticEvaluation();
+    return;
+  }
+  if (game.isDraw() || game.isStalemate() || game.isGameOver()) {
+    automaticEvaluation = { fen, requestId, status: "draw", scoreType: "cp", score: 0, sideToMove: game.turn(), depth: 0 };
+    if (activeStockfishJob) stopActiveStockfishSearch();
+    renderAutomaticEvaluation();
+    return;
+  }
+
+  automaticEvaluation = { fen, requestId, status: "searching", scoreType: null, score: 0, sideToMove: game.turn(), depth: 0 };
+  renderAutomaticEvaluation();
+  queueStockfishJob({ kind: "automatic", id: requestId, fen, sideToMove: game.turn() });
+}
+
+function cancelAutomaticEvaluationForDesign() {
+  automaticEvaluationRequestId += 1;
+  pendingAutomaticJob = null;
+  if (activeStockfishJob?.kind === "automatic") stopActiveStockfishSearch();
+  automaticEvaluation = { fen: null, status: "design", scoreType: null, score: 0, depth: 0 };
+  renderAutomaticEvaluation();
+}
+
 function parseStockfishInfo(line) {
   if (!line.startsWith("info ") || /\b(?:lowerbound|upperbound)\b/.test(line)) return;
   const depth = Number(line.match(/\bdepth (\d+)\b/)?.[1]);
   const multipv = Number(line.match(/\bmultipv (\d+)\b/)?.[1] ?? 1);
   const score = line.match(/\bscore (cp|mate) (-?\d+)\b/);
   const pv = line.match(/\bpv (.+)$/);
-  if (!depth || !multipv || !score || !pv || !analysisState || analysisState.status !== "searching") return;
-  const previous = analysisState.lines.get(multipv);
+  const job = activeStockfishJob;
+  if (!depth || !score || !job) return;
+  if (job.kind === "automatic") {
+    if (!isAutomaticJobPositionCurrent(job) || depth < automaticEvaluation.depth) return;
+    automaticEvaluation = { ...automaticEvaluation, status: "searching", scoreType: score[1], score: Number(score[2]), sideToMove: job.sideToMove, depth };
+    renderAutomaticEvaluation();
+    return;
+  }
+  if (!pv || analysisState !== job.state || job.state.status !== "searching") return;
+  const previous = job.state.lines.get(multipv);
   if (!previous || depth >= previous.depth) {
-    analysisState.lines.set(multipv, {
+    job.state.lines.set(multipv, {
       depth,
       scoreType: score[1],
       score: Number(score[2]),
@@ -1172,6 +1801,24 @@ function finishStockfishSearch() {
     window.clearTimeout(stockfishSearchTimer);
     stockfishSearchTimer = null;
   }
+  const job = activeStockfishJob;
+  activeStockfishJob = null;
+  if (job?.kind === "automatic" && isAutomaticJobPositionCurrent(job)) {
+    automaticEvaluation.status = automaticEvaluation.depth > 0 ? "ready" : "error";
+    renderAutomaticEvaluation();
+  } else if (job?.kind === "manual") {
+    finishManualStockfishSearch();
+  }
+  updateAnalysisControls();
+  void pumpStockfishQueue();
+}
+
+function finishManualStockfishSearch() {
+  stockfishSearchInProgress = false;
+  if (stockfishSearchTimer !== null) {
+    window.clearTimeout(stockfishSearchTimer);
+    stockfishSearchTimer = null;
+  }
   if (!analysisState || analysisState.status !== "searching") {
     updateAnalysisControls();
     return;
@@ -1221,8 +1868,8 @@ function finishStockfishSearch() {
   updateAnalysisControls();
 }
 
-async function analyzeCurrentPosition() {
-  if (stockfishSearchInProgress || analysisState?.status === "loading" || analysisState?.status === "searching") return;
+function analyzeCurrentPosition() {
+  if (analysisState?.status === "loading" || analysisState?.status === "searching") return;
   const fen = currentPositionFen();
   analysisState = {
     snapshotFen: fen,
@@ -1245,26 +1892,7 @@ async function analyzeCurrentPosition() {
     const legalMoves = position.moves({ verbose: true });
     if (!legalMoves.length) throw new Error("La posición no tiene jugadas legales que analizar.");
     analysisState.expectedLines = Math.min(3, legalMoves.length);
-    await ensureStockfishReady();
-    if (!analysisState || analysisState.status !== "loading") return;
-    if (analysisState.snapshotFen !== currentPositionFen() || analysisState.inDesignMode !== isDesignMode) {
-      markAnalysisStale();
-      return;
-    }
-    stockfishWorker.postMessage(`setoption name MultiPV value ${analysisState.expectedLines}`);
-    await waitForStockfishReady();
-    if (!analysisState || analysisState.status !== "loading") return;
-    if (analysisState.snapshotFen !== currentPositionFen() || analysisState.inDesignMode !== isDesignMode) {
-      markAnalysisStale();
-      return;
-    }
-    analysisState.status = "searching";
-    stockfishSearchInProgress = true;
-    setAnalysisStatus("Analizando posición…");
-    updateAnalysisControls();
-    stockfishWorker.postMessage(`position fen ${fen}`);
-    stockfishWorker.postMessage(`go depth ${STOCKFISH_SEARCH_DEPTH}`);
-    stockfishSearchTimer = window.setTimeout(() => handleStockfishFailure("El motor superó el tiempo máximo de análisis."), STOCKFISH_SEARCH_TIMEOUT);
+    queueStockfishJob({ kind: "manual", fen, state: analysisState });
   } catch (error) {
     if (!analysisState || analysisState.status === "stale") return;
     analysisState.status = "error";
@@ -1275,6 +1903,7 @@ async function analyzeCurrentPosition() {
 }
 
 function acceptSelectedAnalysisMove() {
+  if (moveAnimationState) return;
   if (!analysisState || analysisState.status !== "ready") return;
   if (analysisState.inDesignMode !== isDesignMode || analysisState.snapshotFen !== currentPositionFen()) {
     markAnalysisStale();
@@ -1294,7 +1923,7 @@ function acceptSelectedAnalysisMove() {
       closeAnalysisPanel();
       designPosition = nextPosition;
       designTurn = nextTurn;
-      designTurnSelect.value = nextTurn;
+      renderDesignTurnButton();
       hideDesignMessage();
       renderBoard();
     } catch (error) {
@@ -1312,12 +1941,42 @@ function acceptSelectedAnalysisMove() {
     return;
   }
   closeAnalysisPanel();
-  makeMove(move.from, move.to, move.promotion || "q");
+  makeMove(move.from, move.to, move.promotion ?? null);
 }
 
 analyzeButton.addEventListener("click", analyzeCurrentPosition);
 acceptAnalysisMoveButton.addEventListener("click", acceptSelectedAnalysisMove);
 cancelAnalysisButton.addEventListener("click", closeAnalysisPanel);
+promotionOptionButtons.forEach((button) => button.addEventListener("click", () => {
+  if (!pendingPromotion) return;
+  const { from, to } = pendingPromotion;
+  const promotion = button.dataset.promotion;
+  closePromotionSelector();
+  makeMove(from, to, promotion);
+}));
+cancelPromotionButton.addEventListener("click", () => closePromotionSelector(true));
+cancelPromotionTextButton.addEventListener("click", () => closePromotionSelector(true));
+promotionOverlay.addEventListener("click", (event) => {
+  if (event.target === promotionOverlay) closePromotionSelector(true);
+});
+promotionOverlay.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closePromotionSelector(true);
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [...promotionDialog.querySelectorAll("button")];
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});
 
 boardElement.addEventListener("click", (event) => {
   if (suppressClick && event.detail > 0) {
@@ -1332,7 +1991,7 @@ boardElement.addEventListener("pointermove", onPointerMove);
 boardElement.addEventListener("pointerup", onPointerUp);
 boardElement.addEventListener("pointercancel", onPointerCancel);
 resetButton.addEventListener("click", resetGame);
-rotateBoardButton.addEventListener("click", rotateBoard);
+rotateBoardButtons.forEach((button) => button.addEventListener("click", rotateBoard));
 whiteControlButton.addEventListener("click", () => toggleControlView("w"));
 blackControlButton.addEventListener("click", () => toggleControlView("b"));
 enterDesignButton.addEventListener("click", enterDesignMode);
@@ -1346,34 +2005,47 @@ positionFileInput.addEventListener("change", (event) => {
     .finally(() => { positionFileInput.value = ""; });
 });
 loadInDesignButton.addEventListener("click", loadPendingPositionIntoDesign);
-designColorSelect.addEventListener("change", renderPiecePalette);
-designTurnSelect.addEventListener("change", () => {
-  designTurn = designTurnSelect.value;
-  hideDesignMessage();
-  renderBoard();
-});
+designTurnButton.addEventListener("click", toggleDesignTurn);
 erasePieceButton.addEventListener("click", () => {
-  designTool = { type: null, color: designColorSelect.value };
+  designTool = { type: null, color: designTool.color };
+  designEraseMode = true;
   erasePieceButton.setAttribute("aria-pressed", "true");
   piecePalette.querySelectorAll(".palette-piece").forEach((button) => button.setAttribute("aria-pressed", "false"));
+  updateDesignToolPreview();
 });
 clearBoardButton.addEventListener("click", () => {
+  cancelDesignTool();
   designPosition = Array.from({ length: 8 }, () => Array(8).fill(null));
   hideDesignMessage();
   renderBoard();
 });
 initialPositionButton.addEventListener("click", () => {
+  cancelDesignTool();
   designPosition = clonePosition(new Chess().board());
   designTurn = "w";
-  designTurnSelect.value = "w";
+  renderDesignTurnButton();
   hideDesignMessage();
   renderBoard();
 });
 validatePositionButton.addEventListener("click", validateAndShowPosition);
 startDesignedGameButton.addEventListener("click", startDesignedGame);
 document.querySelector("#close-design-message").addEventListener("click", hideDesignMessage);
+document.addEventListener("keydown", handleDesignToolKeydown, true);
+document.addEventListener("pointermove", trackDesignToolPointer, { passive: true });
+document.addEventListener("pointerdown", trackDesignToolPointer, { passive: true });
+window.addEventListener("resize", () => {
+  cancelMoveAnimation();
+  updateDesignToolPreview();
+  updatePromotionSelectorPosition();
+});
+window.addEventListener("scroll", () => {
+  cancelMoveAnimation();
+  updatePromotionSelectorPosition();
+}, { capture: true, passive: true });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") updateClockDisplay(true);
 });
 updateClockDisplay(true);
+await initializePieceStyles();
 renderBoard();
+scheduleAutomaticEvaluation();

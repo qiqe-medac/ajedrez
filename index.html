@@ -12,15 +12,37 @@
 <body>
   <main class="game-shell">
     <header class="page-header">
-      <a class="brand" href="index.html" aria-label="Chess, inicio">
-        <span class="brand-mark" aria-hidden="true">♞</span>
-        <span>Chess</span>
-      </a>
-      <p class="header-caption">Una partida, a tu ritmo</p>
+      <div class="header-brand-group">
+        <button id="settings-button" class="settings-button" type="button" aria-label="Configuración" aria-haspopup="dialog" aria-controls="settings-dialog" title="Configuración">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-1.7 2.94-.08-.03a1.7 1.7 0 0 0-1.83.35l-.06.06h-3.4l-.02-.09a1.7 1.7 0 0 0-1.22-1.4l-.08-.02-1.7-2.94.06-.06a1.7 1.7 0 0 0 0-2.04l-.06-.06 1.7-2.94.08.03a1.7 1.7 0 0 0 1.83-.35l.06-.06h3.4l.02.09a1.7 1.7 0 0 0 1.22 1.4l.08.02 1.7 2.94-.06.06A1.7 1.7 0 0 0 19.4 15Z" transform="translate(-2.4 -3)"/></svg>
+        </button>
+        <a class="brand" href="index.html" aria-label="Chess, inicio">
+          <span class="brand-mark" aria-hidden="true">♞</span>
+          <span>QChess Studio</span>
+        </a>
+      </div>
+      <p class="header-caption">Analizador de posiciones de ajedrez</p>
     </header>
 
     <section class="game-layout" aria-label="Partida de ajedrez">
       <div class="board-frame">
+        <div class="board-coordinate-layout" aria-label="Tablero y coordenadas">
+          <div class="board-files board-files-top" aria-hidden="true"></div>
+          <div class="board-ranks board-ranks-left" aria-hidden="true"></div>
+          <div id="evaluation-bar" class="evaluation-bar" role="img" aria-label="Evaluación de la posición: sin datos">
+            <span id="evaluation-black" class="evaluation-bar-black"></span>
+            <span id="evaluation-white" class="evaluation-bar-white"></span>
+          </div>
+          <div id="chessboard" class="chessboard" role="grid" aria-label="Tablero de ajedrez"></div>
+          <div class="board-ranks board-ranks-right" aria-hidden="true"></div>
+          <div class="board-files board-files-bottom" aria-hidden="true"></div>
+          <button id="rotate-board-button" class="rotate-board-button board-rotate-top" type="button" aria-label="Girar tablero 180 grados" aria-pressed="false" title="Girar tablero">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-9-9 9 9 0 0 1 9-9c2.3 0 4.4.9 6 2.4L21 8"/><path d="M21 3v5h-5"/></svg>
+          </button>
+          <button class="rotate-board-button board-rotate-bottom" type="button" aria-label="Girar tablero 180 grados" aria-pressed="false" title="Girar tablero">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-9-9 9 9 0 0 1 9-9c2.3 0 4.4.9 6 2.4L21 8"/><path d="M21 3v5h-5"/></svg>
+          </button>
+        </div>
         <section id="chess-clocks" class="chess-clocks" aria-label="Relojes de la partida">
           <div id="white-clock" class="clock-card" aria-label="Reloj de las blancas">
             <div class="clock-player-info">
@@ -37,61 +59,56 @@
             <time id="black-clock-time" class="clock-time" datetime="PT0S">00:00</time>
           </div>
         </section>
-        <div class="board-coordinate-layout" aria-label="Tablero y coordenadas">
-          <div class="board-files board-files-top" aria-hidden="true"></div>
-          <div class="board-ranks board-ranks-left" aria-hidden="true"></div>
-          <div id="chessboard" class="chessboard" role="grid" aria-label="Tablero de ajedrez"></div>
-          <div class="board-ranks board-ranks-right" aria-hidden="true"></div>
-          <div class="board-files board-files-bottom" aria-hidden="true"></div>
-        </div>
       </div>
 
       <aside class="game-panel" aria-label="Estado de la partida">
-        <div class="panel-heading">
-          <p class="eyebrow">PARTIDA LOCAL</p>
-          <h1>Chess</h1>
-        </div>
-        <div class="turn-card" aria-live="polite">
-          <span class="turn-indicator" aria-hidden="true"></span>
-          <div>
-            <p class="eyebrow">TURNO ACTUAL</p>
-            <p id="turn-label" class="turn-label">Blancas</p>
+        <div class="turn-card evaluation-card unified-status-card" aria-label="Turno y evaluación" aria-live="polite">
+          <div class="status-turn">
+            <span class="turn-indicator" aria-hidden="true"></span>
+            <div class="status-turn-text">
+              <p class="eyebrow">JUEGAN</p>
+              <p id="turn-label" class="turn-label">Blancas</p>
+            </div>
+          </div>
+          <div class="status-evaluation">
+            <strong id="evaluation-score">—</strong>
+            <p id="evaluation-status" role="status" aria-live="polite">Esperando análisis</p>
           </div>
         </div>
-        <div class="validation-mode-control">
-          <label for="validation-level">Validación de posiciones</label>
-          <select id="validation-level">
-            <option value="basic">Básica</option>
-            <option value="strict">Estricta (sin historial)</option>
-          </select>
-        </div>
         <button id="enter-design-button" class="reset-button" type="button">Modo diseño</button>
-        <div class="position-file-buttons" role="group" aria-label="Guardar o cargar posiciones">
-          <button id="save-position-button" class="reset-button" type="button">Guardar posición</button>
-          <button id="load-position-button" class="reset-button" type="button">Cargar posición</button>
-        </div>
         <input id="position-file-input" type="file" accept=".fen,text/plain" hidden>
         <section id="design-tools" class="design-tools" aria-label="Herramientas de diseño" hidden>
           <h2>Editar posición</h2>
-          <label for="design-color">Color de las piezas</label>
-          <select id="design-color">
-            <option value="w">Blancas</option>
-            <option value="b">Negras</option>
-          </select>
-          <span class="design-label">Selecciona una pieza</span>
-          <div id="piece-palette" class="piece-palette" role="group" aria-label="Piezas para colocar"></div>
-          <button id="erase-piece-button" class="reset-button" type="button" aria-pressed="false">Eliminar pieza</button>
-          <div class="design-action-row">
+          <div class="validation-mode-control">
+            <label for="validation-level">Validación de posiciones</label>
+            <select id="validation-level">
+              <option value="basic">Básica</option>
+              <option value="strict">Estricta (sin historial)</option>
+            </select>
+          </div>
+
+          <div id="piece-palette" class="piece-palettes" role="group" aria-label="Piezas para colocar">
+            <div class="piece-color-row">
+
+              <div class="piece-option-row" data-color="w" role="group" aria-label="Piezas blancas"></div>
+            </div>
+            <div class="piece-color-row">
+
+              <div class="piece-option-row" data-color="b" role="group" aria-label="Piezas negras"></div>
+            </div>
+          </div>
+          <div class="design-action-row" role="group" aria-label="Acciones de edición">
+            <button id="erase-piece-button" class="reset-button" type="button" aria-pressed="false">Eliminar</button>
             <button id="clear-board-button" class="reset-button" type="button">Vaciar</button>
             <button id="initial-position-button" class="reset-button" type="button">Posición inicial</button>
           </div>
-          <label for="design-turn">Juegan</label>
-          <select id="design-turn">
-            <option value="w">Blancas</option>
-            <option value="b">Negras</option>
-          </select>
+          <button id="design-turn-button" class="reset-button design-turn-button" type="button" aria-pressed="false" title="Alternar el turno">Juegan blancas</button>
           <button id="validate-position-button" class="reset-button" type="button">Validar posición</button>
           <button id="start-designed-game-button" class="reset-button primary-button" type="button">Iniciar partida</button>
+          <div class="position-file-buttons" role="group" aria-label="Guardar o cargar posiciones">
+            <button id="save-position-button" class="reset-button" type="button">Guardar posición</button>
+            <button id="load-position-button" class="reset-button" type="button">Cargar posición</button>
+          </div>
         </section>
         <section id="design-message" class="design-message" aria-live="polite" hidden>
           <button id="close-design-message" class="message-close" type="button" aria-label="Cerrar mensaje">×</button>
@@ -121,9 +138,6 @@
             <span aria-hidden="true">◉</span><span>Control negras</span>
           </button>
         </div>
-        <button id="rotate-board-button" class="reset-button" type="button" aria-label="Girar orientación del tablero" aria-pressed="false">
-          <span aria-hidden="true">⟳</span> Girar tablero
-        </button>
         <button id="reset-button" class="reset-button" type="button">
           <span aria-hidden="true">↻</span> Reiniciar partida
         </button>
@@ -132,5 +146,64 @@
     </section>
     <footer class="page-footer">Chess <span aria-hidden="true">·</span> Juego de estrategia</footer>
   </main>
+  <div id="settings-dialog" class="settings-backdrop" hidden>
+    <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1">
+      <header class="settings-modal-header">
+        <div><p class="eyebrow">PREFERENCIAS</p><h2 id="settings-title">Configuración</h2></div>
+        <button id="settings-close" class="settings-close" type="button" aria-label="Cerrar configuración">×</button>
+      </header>
+      <div class="settings-modal-body">
+        <nav class="settings-categories" aria-label="Categorías de configuración">
+          <span class="settings-category is-current" aria-current="page">Apariencia</span>
+          <span class="settings-category">Partida</span>
+        </nav>
+        <div class="settings-content">
+          <section aria-labelledby="board-style-title">
+            <h3 id="board-style-title">Estilo del tablero</h3>
+            <p class="settings-description">Elige los colores de las casillas. El cambio se aplica al instante.</p>
+            <div id="board-theme-options" class="board-theme-options" role="group" aria-label="Estilos del tablero">
+              <button class="board-theme-option" type="button" data-theme="classic" aria-pressed="false"><span class="theme-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Clásico</span></button>
+              <button class="board-theme-option" type="button" data-theme="green" aria-pressed="false"><span class="theme-preview theme-green" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Verde</span></button>
+              <button class="board-theme-option" type="button" data-theme="blue" aria-pressed="false"><span class="theme-preview theme-blue" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Azul</span></button>
+              <button class="board-theme-option" type="button" data-theme="gray" aria-pressed="false"><span class="theme-preview theme-gray" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Gris</span></button>
+              <button class="board-theme-option" type="button" data-theme="wood" aria-pressed="false"><span class="theme-preview theme-wood" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Madera</span></button>
+            </div>
+          </section>
+          <section class="settings-section piece-style-section" aria-labelledby="piece-style-title">
+            <h3 id="piece-style-title">Estilo de piezas</h3>
+            <p class="settings-description">Elige el diseño de las piezas blancas y negras. Se aplica al instante.</p>
+            <div id="piece-style-options" class="piece-style-options" role="group" aria-label="Estilos de piezas"></div>
+            <p id="piece-style-status" class="piece-style-status" role="status" aria-live="polite"></p>
+          </section>
+          <section class="settings-section" aria-labelledby="game-settings-title">
+            <h3 id="game-settings-title">Partida</h3>
+            <label class="settings-toggle" for="show-clock-setting">
+              <span><strong>Mostrar control de tiempo</strong><small>Mostrar los relojes de blancas y negras junto al tablero.</small></span>
+              <input id="show-clock-setting" type="checkbox" role="switch" checked>
+            </label>
+          </section>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div id="design-tool-preview" class="design-tool-preview" aria-hidden="true" hidden>
+    <img id="design-tool-preview-image" alt="">
+    <span class="design-tool-erase-mark">×</span>
+  </div>
+  <div id="promotion-overlay" class="promotion-overlay" hidden>
+    <section class="promotion-dialog" role="dialog" aria-modal="true" aria-labelledby="promotion-title">
+      <div class="promotion-heading">
+        <h2 id="promotion-title">Elige una pieza</h2>
+        <button id="cancel-promotion" class="promotion-cancel" type="button" aria-label="Cancelar coronación">×</button>
+      </div>
+      <div class="promotion-options" role="group" aria-label="Pieza de coronación">
+        <button class="promotion-option" type="button" data-promotion="q" aria-label="Coronar en dama"><img alt=""><span>Dama</span></button>
+        <button class="promotion-option" type="button" data-promotion="r" aria-label="Coronar en torre"><img alt=""><span>Torre</span></button>
+        <button class="promotion-option" type="button" data-promotion="b" aria-label="Coronar en alfil"><img alt=""><span>Alfil</span></button>
+        <button class="promotion-option" type="button" data-promotion="n" aria-label="Coronar en caballo"><img alt=""><span>Caballo</span></button>
+      </div>
+      <button id="cancel-promotion-text" class="promotion-cancel-text" type="button">Cancelar</button>
+    </section>
+  </div>
 </body>
 </html>
