@@ -11,10 +11,17 @@ const welcomeBackdrop = document.querySelector("#welcome-backdrop");
 const welcomeDialog = document.querySelector("#welcome-dialog");
 const welcomeCloseButton = document.querySelector("#welcome-close");
 const welcomeAcceptButton = document.querySelector("#welcome-accept");
+const noticeBackdrop = document.querySelector("#notice-backdrop");
+const noticeDialog = document.querySelector("#notice-dialog");
+const noticeTitle = document.querySelector("#notice-title");
+const noticeMessage = document.querySelector("#notice-message");
+const noticeDetails = document.querySelector("#notice-details");
+const noticeAcceptButton = document.querySelector("#notice-accept");
 const welcomeDismissCheckbox = document.querySelector("#welcome-dismiss");
 const welcomeLink = document.querySelector("#welcome-link");
 const WELCOME_DISMISSED_KEY = "qchessWelcomeDismissed";
 let welcomeOpener = null;
+let noticeOpener = null;
 const themeOptions = [...document.querySelectorAll(".board-theme-option")];
 const showClockSetting = document.querySelector("#show-clock-setting");
 const showControlButtonsSetting = document.querySelector("#show-control-buttons-setting");
@@ -105,6 +112,56 @@ welcomeDialog.addEventListener("keydown", (event) => {
   } else if (!event.shiftKey && document.activeElement === focusable.at(-1)) {
     event.preventDefault();
     focusable[0].focus();
+  }
+});
+
+function openNoticeModal({ title, message, errors = [], warnings = [], opener = document.activeElement }) {
+  noticeTitle.textContent = title;
+  noticeMessage.textContent = message;
+  noticeDetails.replaceChildren();
+  [
+    ["errors", "Errores", errors],
+    ["warnings", "Avisos", warnings],
+  ].forEach(([className, headingText, items]) => {
+    if (!items.length) return;
+    const section = document.createElement("section");
+    const heading = document.createElement("h3");
+    const list = document.createElement("ul");
+    section.className = `notice-detail-section ${className}`;
+    heading.textContent = headingText;
+    items.forEach((text) => {
+      const item = document.createElement("li");
+      item.textContent = text;
+      list.append(item);
+    });
+    section.append(heading, list);
+    noticeDetails.append(section);
+  });
+  noticeDialog.setAttribute("aria-describedby", noticeDetails.childElementCount
+    ? "notice-message notice-details"
+    : "notice-message");
+  noticeOpener = opener instanceof HTMLElement ? opener : null;
+  noticeBackdrop.hidden = false;
+  document.body.classList.add("notice-open");
+  noticeAcceptButton.focus();
+}
+
+function closeNoticeModal() {
+  if (noticeBackdrop.hidden) return;
+  noticeBackdrop.hidden = true;
+  document.body.classList.remove("notice-open");
+  if (noticeOpener?.isConnected) noticeOpener.focus();
+  noticeOpener = null;
+}
+
+noticeAcceptButton.addEventListener("click", closeNoticeModal);
+noticeDialog.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeNoticeModal();
+  } else if (event.key === "Tab") {
+    event.preventDefault();
+    noticeAcceptButton.focus();
   }
 });
 
@@ -330,6 +387,7 @@ const clockViews = {
 };
 
 let game = new Chess();
+let gameOverNotified = false;
 let captureHistoryComplete = true;
 let selectedSquare = null;
 let legalMoves = [];
@@ -1009,17 +1067,81 @@ function makeMove(from, to, promotion = null) {
     const moverColor = game.turn();
     const move = game.move({ from, to, ...(promotion ? { promotion } : {}) });
     if (!move) return false;
+    const gameFinished = game.isGameOver();
     switchClock(moverColor, game.turn());
     lastMove = { from: move.from, to: move.to };
     clearSelection();
     startMoveAnimation(sprites);
     renderBoard();
     scheduleAutomaticEvaluation();
+    if (gameFinished) showGameFinishedModal();
     return true;
   } catch {
     sprites.forEach(({ element }) => element.remove());
     return false;
   }
+}
+
+function invalidateFinishedGameWork() {
+  automaticEvaluationRequestId += 1;
+  automaticPlayerGeneration.w += 1;
+  automaticPlayerGeneration.b += 1;
+  pendingAutomaticJob = null;
+  pendingManualJob = null;
+  deferredAutomaticMove = null;
+  analysisState = null;
+  analysisPanel.hidden = true;
+  clearAnalysisVariants();
+  updateAnalysisControls();
+}
+
+function getGameFinishedNotice() {
+  if (game.isCheckmate()) {
+    const winner = game.turn() === "w" ? "negras" : "blancas";
+    return {
+      title: "Partida finalizada",
+      message: `¡Jaque mate! Las ${winner} han ganado.`,
+    };
+  }
+  if (game.isStalemate()) {
+    const sideToMove = game.turn() === "w" ? "blancas" : "negras";
+    return {
+      title: "Partida finalizada",
+      message: `Partida finalizada en tablas por ahogado. A las ${sideToMove} les tocaba mover, no tienen movimientos legales y su rey no está en jaque.`,
+    };
+  }
+  if (game.isInsufficientMaterial()) {
+    return {
+      title: "Partida finalizada",
+      message: "Partida finalizada en tablas por material insuficiente para forzar un jaque mate.",
+    };
+  }
+  if (game.isThreefoldRepetition()) {
+    return {
+      title: "Partida finalizada",
+      message: "Partida finalizada en tablas por repetición de posición.",
+    };
+  }
+  if (game.isDrawByFiftyMoves()) {
+    return {
+      title: "Partida finalizada",
+      message: "Partida finalizada en tablas por la regla de los cincuenta movimientos, sin capturas ni movimientos de peón.",
+    };
+  }
+  return {
+    title: "Partida finalizada",
+    message: game.isDraw()
+      ? "Partida finalizada en tablas por otra condición de tablas reconocida por el motor de ajedrez."
+      : "La partida ha terminado según las reglas del motor de ajedrez.",
+  };
+}
+
+function showGameFinishedModal() {
+  if (gameOverNotified || !game.isGameOver()) return;
+  gameOverNotified = true;
+  invalidateFinishedGameWork();
+  boardElement.tabIndex = -1;
+  openNoticeModal({ ...getGameFinishedNotice(), opener: boardElement });
 }
 
 function handleSquareClick(coordinate) {
@@ -1275,19 +1397,38 @@ function validatePosition(position, turn, fenText = null, imported = false) {
 
 function validateAndShowPosition() {
   const result = validatePosition(designPosition, designTurn);
-  if (result.errors.length) {
-    showDesignMessage("La posición no se puede iniciar. Puedes corregirla sin perder las piezas.", result.errors, result.warnings);
-    return result;
-  }
-  const checkedSide = result.whiteInCheck ? "blancas" : result.blackInCheck ? "negras" : null;
-  const status = `Posición válida. Juegan ${designTurn === "w" ? "blancas" : "negras"}${checkedSide ? ` y están en jaque las ${checkedSide}` : ""}.`;
-  showDesignMessage(status, [], result.warnings, true);
+  showPositionValidationResult(result, validatePositionButton);
   return result;
 }
+
+function showPositionValidationResult(result, opener) {
+  if (result.errors.length) {
+    openNoticeModal({
+      title: "Posición no válida",
+      message: "No se puede iniciar esta posición como una partida activa. Corrige las piezas indicadas y vuelve a validarla con «Validar posición».",
+      errors: result.errors,
+      warnings: result.warnings,
+      opener,
+    });
+    return;
+  }
+  const checkedSide = result.whiteInCheck ? "blancas" : result.blackInCheck ? "negras" : null;
+  const checkNotice = checkedSide ? ` El rey de las ${checkedSide} está en jaque.` : "";
+  openNoticeModal({
+    title: "Posición válida",
+    message: `La posición ha superado las comprobaciones y el motor la acepta como una partida activa. Juegan ${designTurn === "w" ? "blancas" : "negras"}.${checkNotice} Cuando quieras continuar, pulsa «Iniciar partida».`,
+    warnings: result.warnings,
+    opener,
+  });
+}
 function startDesignedGame() {
-  const result = validateAndShowPosition();
-  if (!result.candidate) return;
+  const result = validatePosition(designPosition, designTurn);
+  if (!result.candidate) {
+    showPositionValidationResult(result, startDesignedGameButton);
+    return;
+  }
   game = result.candidate;
+  gameOverNotified = false;
   captureHistoryComplete = false;
   isDesignMode = false;
   designTool = { type: null, color: designTool.color };
@@ -1307,6 +1448,7 @@ function startDesignedGame() {
   renderBoard();
   updateDesignToolPreview();
   scheduleAutomaticEvaluation();
+  showGameFinishedModal();
 }
 
 function saveCurrentPosition() {
@@ -1336,6 +1478,7 @@ function clearGameForImportedPosition(candidate) {
   closePromotionSelector();
   cancelMoveAnimation(false);
   game = candidate;
+  gameOverNotified = false;
   captureHistoryComplete = false;
   resetClocks();
   clearSelection();
@@ -1345,6 +1488,7 @@ function clearGameForImportedPosition(candidate) {
   suppressClick = false;
   renderBoard();
   scheduleAutomaticEvaluation();
+  showGameFinishedModal();
 }
 
 function loadFenFile(file) {
@@ -1512,6 +1656,7 @@ function resetGame() {
     return;
   }
   game.reset();
+  gameOverNotified = false;
   captureHistoryComplete = true;
   resetClocks();
   clearSelection();
